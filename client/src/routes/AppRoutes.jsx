@@ -14,6 +14,7 @@ import Reports from '../pages/Reports';
 import Profile from '../pages/Profile';
 import Settings from '../pages/Settings';
 import NotFound from '../pages/NotFound';
+import ServerError from '../pages/ServerError';
 
 import ProtectedRoute from './ProtectedRoute';
 
@@ -25,6 +26,7 @@ const AppRoutes = () => {
         <Route path="/" element={<Landing />} />
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
+        <Route path="/500" element={<ServerError />} />
       </Route>
 
       {/* Authenticated Workspace Pages */}
