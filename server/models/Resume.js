@@ -59,6 +59,29 @@ const resumeSchema = new mongoose.Schema(
       enum: ['pending', 'completed', 'failed'],
       default: 'pending',
     },
+    analysisStatus: {
+      type: String,
+      enum: ['none', 'pending', 'completed', 'failed'],
+      default: 'none',
+    },
+    analysis: {
+      atsScore: {
+        type: Number,
+        default: 0,
+      },
+      strengths: [{ type: String }],
+      weaknesses: [{ type: String }],
+      missingSkills: [{ type: String }],
+      roleMatch: [{ type: String }],
+      improvements: [{ type: String }],
+      summary: {
+        type: String,
+        default: '',
+      },
+      analyzedAt: {
+        type: Date,
+      },
+    },
     uploadDate: {
       type: Date,
       default: Date.now,

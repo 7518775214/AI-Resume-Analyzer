@@ -1,7 +1,9 @@
 const path = require('path');
+const mongoose = require('mongoose');
 const Resume = require('../models/Resume');
 const storageService = require('../services/storageService');
 const parsingService = require('../services/parsingService');
+const geminiService = require('../services/geminiService');
 
 /**
  * Controller to handle resume upload, text extraction, and metadata persistence
@@ -154,6 +156,13 @@ const getResumeById = async (req, res) => {
       });
     }
 
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid resume ID format.',
+      });
+    }
+
     const resume = await Resume.findOne({ _id: id, userId });
     if (!resume) {
       return res.status(404).json({
@@ -177,8 +186,102 @@ const getResumeById = async (req, res) => {
   }
 };
 
+/**
+ * Controller to trigger Gemini AI Resume Analysis on extracted text
+ * 
+ * @route   POST /api/resumes/:id/analyze
+ * @access  Private (Protected by JWT)
+ */
+const analyzeResume = async (req, res) => {
+  try {
+    const userId = req.user?.id;
+    const { id } = req.params;
+
+    if (!userId) {
+      return res.status(401).json({
+        status: 'fail',
+        message: 'Unauthorized access. User authentication required.',
+      });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid resume ID format.',
+      });
+    }
+
+    // 1. Fetch target resume belonging to authenticated user
+    const resume = await Resume.findOne({ _id: id, userId });
+    if (!resume) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Resume document not found.',
+      });
+    }
+
+    // 2. Validate presence of parsed resume text
+    if (!resume.extractedText || resume.extractedText.trim() === '') {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Resume content is empty or could not be parsed. Please re-upload a clear PDF or DOCX file.',
+      });
+    }
+
+    // 3. Mark status as pending while calling Gemini AI
+    resume.analysisStatus = 'pending';
+    await resume.save();
+
+    // 4. Call dedicated Gemini AI Service to perform resume evaluation
+    try {
+      const analysisResult = await geminiService.analyzeResume(
+        resume.extractedText,
+        resume.jobTitle,
+        resume.jobDescription
+      );
+
+      // 5. Update and persist AI analysis in MongoDB resume document
+      resume.analysis = analysisResult;
+      resume.analysisStatus = 'completed';
+      await resume.save();
+
+      // 6. Return clean structured JSON response to frontend
+      return res.status(200).json({
+        status: 'success',
+        message: 'Resume analyzed successfully with Gemini AI.',
+        data: {
+          resumeId: resume._id,
+          originalFileName: resume.originalFileName,
+          jobTitle: resume.jobTitle,
+          analysisStatus: resume.analysisStatus,
+          analysis: resume.analysis,
+        },
+      });
+    } catch (aiError) {
+      console.error(`[RESUME CONTROLLER ERROR] AI analysis failed for resume ${id}:`, aiError);
+      
+      // Update analysis status to failed on error
+      resume.analysisStatus = 'failed';
+      await resume.save();
+
+      return res.status(500).json({
+        status: 'error',
+        message: aiError.message || 'Gemini AI Resume Analysis failed. Please check API configuration or try again later.',
+      });
+    }
+  } catch (error) {
+    console.error('[RESUME CONTROLLER ERROR] Unexpected failure during resume analysis:', error);
+    return res.status(500).json({
+      status: 'error',
+      message: 'An unexpected internal server error occurred while analyzing the resume.',
+    });
+  }
+};
+
 module.exports = {
   uploadResume,
   getUserResumes,
   getResumeById,
+  analyzeResume,
 };
+

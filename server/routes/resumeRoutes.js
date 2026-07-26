@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const authenticateToken = require('../middleware/authMiddleware');
 const uploadResumeMiddleware = require('../middleware/uploadMiddleware');
-const { uploadResume, getUserResumes, getResumeById } = require('../controllers/resumeController');
+const { uploadResume, getUserResumes, getResumeById, analyzeResume } = require('../controllers/resumeController');
 
 /**
  * Resume Routes
@@ -24,4 +24,10 @@ router.get('/', authenticateToken, getUserResumes);
 // @access  Private
 router.get('/:id', authenticateToken, getResumeById);
 
+// @route   POST /api/resumes/:id/analyze
+// @desc    Trigger Gemini AI Resume Analysis on extracted text
+// @access  Private
+router.post('/:id/analyze', authenticateToken, analyzeResume);
+
 module.exports = router;
+

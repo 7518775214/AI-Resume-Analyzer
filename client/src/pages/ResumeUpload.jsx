@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Link } from 'react-router-dom';
 import PageHeader from '../components/PageHeader';
 import Card from '../components/Card';
 import Input from '../components/Input';
@@ -223,6 +224,14 @@ const ResumeUpload = () => {
                     <p className="font-semibold text-indigo-300">{uploadedResume.jobTitle}</p>
                   </div>
                 )}
+              </div>
+
+              <div className="mt-5 pt-4 border-t border-slate-800 flex justify-end">
+                <Link to={`/analysis?id=${uploadedResume.id || uploadedResume._id}`}>
+                  <Button variant="primary" icon={<Icon name="sparkles" className="w-4 h-4" />}>
+                    Analyze Resume with Gemini AI
+                  </Button>
+                </Link>
               </div>
             </Card.Content>
           </Card>

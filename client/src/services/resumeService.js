@@ -37,6 +37,27 @@ const resumeService = {
     const response = await api.get('/resumes');
     return response.data;
   },
+
+  /**
+   * Fetches single resume details by ID
+   * @param {string} id - Resume document ID
+   * @returns {Promise<object>} API response object with resume details
+   */
+  getResumeById: async (id) => {
+    const response = await api.get(`/resumes/${id}`);
+    return response.data;
+  },
+
+  /**
+   * Triggers Gemini AI Analysis for target resume ID
+   * @param {string} id - Resume document ID
+   * @returns {Promise<object>} API response object with AI analysis result
+   */
+  analyzeResume: async (id) => {
+    const response = await api.post(`/resumes/${id}/analyze`);
+    return response.data;
+  },
 };
 
 export default resumeService;
+
