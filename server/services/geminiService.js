@@ -7,6 +7,9 @@
  * Includes timeout control, exponential backoff retries, and secure error handling.
  */
 
+const logger = require('../utils/logger');
+const { cleanExtractedText } = require('../utils/textCleaner');
+
 /**
  * Clean and extract JSON string from raw Gemini API output.
  * Handles markdown code fences like ```json ... ``` and extracts content between '{' and '}'.
@@ -36,6 +39,7 @@ const extractJsonString = (rawText) => {
 
 /**
  * Validates and normalizes Gemini AI analysis output into strict schema.
+ * Supports string-to-array fallback parsing if Gemini outputs comma or newline delimited strings.
  * 
  * @param {object} parsed 
  * @returns {object} Validated analysis object
@@ -45,19 +49,26 @@ const validateAnalysisResponse = (parsed) => {
     throw new Error('AI returned an invalid empty response structure.');
   }
 
-  // 1. Validate atsScore (number 0 - 100)
-  let atsScore = 70;
+  // 1. Validate atsScore (number 0 - 100). Default to neutral 50 baseline if invalid/missing.
+  let atsScore = 50;
   if (typeof parsed.atsScore === 'number' && !isNaN(parsed.atsScore)) {
     atsScore = Math.min(100, Math.max(0, Math.round(parsed.atsScore)));
   } else if (typeof parsed.atsScore === 'string' && !isNaN(Number(parsed.atsScore))) {
     atsScore = Math.min(100, Math.max(0, Math.round(Number(parsed.atsScore))));
   }
 
-  // Helper to ensure array of non-empty strings
+  // Robust helper to ensure array of non-empty strings (supports string-to-array conversion)
   const sanitizeArray = (arr, defaultItem) => {
     if (Array.isArray(arr)) {
-      const filtered = arr.map((item) => String(item).trim()).filter(Boolean);
+      const filtered = arr.map((item) => String(item).replace(/^[-*•\d.\s]+/, '').trim()).filter(Boolean);
       if (filtered.length > 0) return filtered;
+    } else if (typeof arr === 'string' && arr.trim().length > 0) {
+      // Split comma-separated or line-separated string outputs into array items
+      const splitItems = arr
+        .split(/[\n,;]+/)
+        .map((item) => item.replace(/^[-*•\d.\s]+/, '').trim())
+        .filter(Boolean);
+      if (splitItems.length > 0) return splitItems;
     }
     return defaultItem ? [defaultItem] : [];
   };
@@ -113,6 +124,27 @@ const validateAnalysisResponse = (parsed) => {
 };
 
 /**
+ * Check whether an error response indicates an invalid or missing API key
+ * 
+ * @param {string} errMsg 
+ * @param {number} [statusCode] 
+ * @returns {boolean}
+ */
+const isApiKeyError = (errMsg, statusCode) => {
+  if (statusCode === 401 || statusCode === 403) return true;
+  if (!errMsg || typeof errMsg !== 'string') return false;
+  const lower = errMsg.toLowerCase();
+  return (
+    lower.includes('api key') ||
+    lower.includes('api_key_invalid') ||
+    lower.includes('apikey') ||
+    lower.includes('unauthorized') ||
+    lower.includes('forbidden') ||
+    lower.includes('invalid key')
+  );
+};
+
+/**
  * Helper to perform HTTP POST fetch with AbortController timeout and exponential backoff retry
  * 
  * @param {string} endpoint - Gemini API endpoint URL
@@ -145,7 +177,7 @@ const fetchWithTimeoutAndRetry = async (endpoint, payload, maxRetries = 1, timeo
       if ((response.status === 429 || response.status >= 500) && attempt < maxRetries) {
         attempt++;
         const backoffMs = Math.pow(2, attempt) * 1000;
-        console.warn(`[GEMINI SERVICE WARNING] Transient HTTP ${response.status}. Retrying attempt ${attempt}/${maxRetries} after ${backoffMs}ms...`);
+        logger.warn(`[GEMINI SERVICE WARNING] Transient HTTP ${response.status}. Retrying attempt ${attempt}/${maxRetries} after ${backoffMs}ms...`);
         await new Promise((resolve) => setTimeout(resolve, backoffMs));
         continue;
       }
@@ -161,7 +193,7 @@ const fetchWithTimeoutAndRetry = async (endpoint, payload, maxRetries = 1, timeo
       if (attempt < maxRetries) {
         attempt++;
         const backoffMs = Math.pow(2, attempt) * 1000;
-        console.warn(`[GEMINI SERVICE WARNING] Network fetch failed (${err.message}). Retrying attempt ${attempt}/${maxRetries}...`);
+        logger.warn(`[GEMINI SERVICE WARNING] Network fetch failed (${err.message}). Retrying attempt ${attempt}/${maxRetries}...`);
         await new Promise((resolve) => setTimeout(resolve, backoffMs));
         continue;
       }
@@ -175,6 +207,7 @@ const fetchWithTimeoutAndRetry = async (endpoint, payload, maxRetries = 1, timeo
 /**
  * Shared helper to call Google Gemini API using @google/generative-ai SDK
  * with automatic fallback to native fetch if needed.
+ * Includes timeout control, exponential backoff retries, and immediate fail-fast on API key errors.
  * 
  * Supported models in order of preference:
  * 1. gemini-1.5-flash (Fast, efficient, default stable model)
@@ -211,42 +244,72 @@ const callGeminiApi = async (systemContext, userContent, generationConfigOverrid
   if (GoogleGenerativeAI) {
     const genAI = new GoogleGenerativeAI(apiKey.trim());
 
-    for (const modelName of models) {
+    // Helper to execute SDK model call with 30s timeout
+    const generateWithSdkTimeout = async (model, prompt, timeoutMs = 30000) => {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
       try {
-        const model = genAI.getGenerativeModel({
-          model: modelName,
-          generationConfig: {
-            responseMimeType: 'application/json',
-            temperature: 0.2,
-            ...generationConfigOverride,
-          },
+        const promise = model.generateContent(prompt);
+        const timeoutPromise = new Promise((_, reject) => {
+          controller.signal.addEventListener('abort', () => {
+            reject(new Error(`Gemini API SDK request timed out after ${timeoutMs / 1000} seconds.`));
+          });
         });
 
-        const result = await model.generateContent(promptText);
-        const response = await result.response;
-        const text = response.text();
-
-        if (text && text.trim().length > 0) {
-          return text;
-        }
+        const result = await Promise.race([promise, timeoutPromise]);
+        clearTimeout(timeoutId);
+        return result;
       } catch (err) {
-        const errMsg = err.message || String(err);
-        if (process.env.NODE_ENV === 'development') {
-          console.warn(`[GEMINI SERVICE WARNING] SDK call to model '${modelName}' failed: ${errMsg}`);
-        }
+        clearTimeout(timeoutId);
+        throw err;
+      }
+    };
 
-        if (
-          errMsg.toLowerCase().includes('api key') ||
-          errMsg.includes('API_KEY_INVALID') ||
-          errMsg.includes('400') ||
-          errMsg.includes('403')
-        ) {
-          if (errMsg.toLowerCase().includes('api key') || errMsg.includes('API_KEY_INVALID')) {
+    for (const modelName of models) {
+      let attempt = 0;
+      const maxRetries = 1;
+
+      while (attempt <= maxRetries) {
+        try {
+          const model = genAI.getGenerativeModel({
+            model: modelName,
+            generationConfig: {
+              responseMimeType: 'application/json',
+              temperature: 0.2,
+              maxOutputTokens: 2500,
+              ...generationConfigOverride,
+            },
+          });
+
+          const result = await generateWithSdkTimeout(model, promptText, 30000);
+          const response = await result.response;
+          const text = response.text();
+
+          if (text && text.trim().length > 0) {
+            return text;
+          }
+        } catch (err) {
+          const errMsg = err.message || String(err);
+
+          // Fail-fast on invalid API key errors without trying other models
+          if (isApiKeyError(errMsg)) {
+            logger.error(`[GEMINI SERVICE ERROR] Invalid API key detected on SDK model ${modelName}: ${errMsg}`);
             throw new Error('Invalid or unauthorized Gemini API key provided.');
           }
-        }
 
-        lastError = new Error(`Gemini API Error (${modelName}): ${errMsg}`);
+          if (attempt < maxRetries && !errMsg.includes('timed out')) {
+            attempt++;
+            const backoffMs = Math.pow(2, attempt) * 1000;
+            logger.warn(`[GEMINI SERVICE WARNING] SDK call to model '${modelName}' failed (${errMsg}). Retrying attempt ${attempt}/${maxRetries} after ${backoffMs}ms...`);
+            await new Promise((resolve) => setTimeout(resolve, backoffMs));
+            continue;
+          }
+
+          logger.warn(`[GEMINI SERVICE WARNING] SDK call to model '${modelName}' failed: ${errMsg}`);
+          lastError = new Error(`Gemini API Error (${modelName}): ${errMsg}`);
+          break;
+        }
       }
     }
   }
@@ -265,6 +328,7 @@ const callGeminiApi = async (systemContext, userContent, generationConfigOverrid
     generationConfig: {
       responseMimeType: 'application/json',
       temperature: 0.2,
+      maxOutputTokens: 2500,
       ...generationConfigOverride,
     },
   };
@@ -278,15 +342,13 @@ const callGeminiApi = async (systemContext, userContent, generationConfigOverrid
         const errorData = await response.json().catch(() => ({}));
         const apiErrMsg = errorData.error?.message || `HTTP ${response.status} ${response.statusText}`;
 
-        if (response.status === 400 || response.status === 401 || response.status === 403) {
-          if (apiErrMsg.toLowerCase().includes('api key')) {
-            throw new Error('Invalid or unauthorized Gemini API key provided.');
-          }
+        // Fail-fast on invalid API key errors without trying other models
+        if (isApiKeyError(apiErrMsg, response.status)) {
+          logger.error(`[GEMINI SERVICE ERROR] Invalid API key returned by REST API model ${model}: ${apiErrMsg}`);
+          throw new Error('Invalid or unauthorized Gemini API key provided.');
         }
 
-        if (process.env.NODE_ENV === 'development') {
-          console.warn(`[GEMINI SERVICE WARNING] REST call to model ${model} returned non-OK status: ${apiErrMsg}. Trying next model...`);
-        }
+        logger.warn(`[GEMINI SERVICE WARNING] REST call to model ${model} returned non-OK status (${response.status}): ${apiErrMsg}. Trying next model...`);
         lastError = new Error(`Gemini API Error (${model}): ${apiErrMsg}`);
         continue;
       }
@@ -308,15 +370,13 @@ const callGeminiApi = async (systemContext, userContent, generationConfigOverrid
     }
   }
 
-  if (process.env.NODE_ENV === 'development' && lastError) {
-    console.error('[GEMINI SERVICE ERROR] All model attempts failed:', lastError.message);
-  }
-
+  logger.error('[GEMINI SERVICE ERROR] All model attempts failed:', lastError ? lastError.message : 'Unknown error');
   throw lastError || new Error('Failed to obtain response from Gemini API. Please check network connection and API key.');
 };
 
 /**
- * Analyzes resume text using Google Gemini API
+ * Analyzes resume text using Google Gemini API.
+ * Includes text preprocessing, structured schema enforcement, and parse error retries.
  * 
  * @param {string} extractedText - Extracted text content from resume PDF/DOCX
  * @param {string} [jobTitle] - Optional target job title
@@ -324,19 +384,22 @@ const callGeminiApi = async (systemContext, userContent, generationConfigOverrid
  * @returns {Promise<object>} Validated analysis object matching required JSON schema
  */
 const analyzeResume = async (extractedText, jobTitle = '', jobDescription = '') => {
-  if (!extractedText || extractedText.trim().length === 0) {
+  if (!extractedText || typeof extractedText !== 'string' || extractedText.trim().length === 0) {
     throw new Error(
       'Resume content is empty or could not be extracted. Unable to perform AI analysis.'
     );
   }
 
-  // Construct structured prompt with clear evaluation criteria
+  // Preprocess and clean extracted text to remove zero-width characters and normalize line breaks
+  const sanitizedResumeText = cleanExtractedText(extractedText);
+
+  // Construct structured prompt with clear evaluation criteria & rubric
   const systemContext = `You are a Senior ATS (Applicant Tracking System) Expert and Executive Technical Recruiter with 15+ years of experience.
 Evaluate the candidate's resume text against the target job role and job description.
 Perform a thorough, objective, and realistic audit.
 
 EVALUATION CRITERIA:
-- atsScore: Calculate a realistic 0-100 score based on keyword match density, hard/soft skill relevance, structural formatting readability, and quantifiable business impact metrics.
+- atsScore: Calculate a realistic integer 0-100 score based on keyword match density, hard/soft skill relevance, structural formatting readability, and quantifiable business impact metrics (85-100: Exceptional, 70-84: Good, 50-69: Moderate gaps, 0-49: Poor).
 - strengths: List key strong qualifications, relevant achievements, and demonstrated expertise.
 - weaknesses: Identify missing elements, unquantified bullets, formatting risks, or weak phrasing.
 - missingSkills: List specific missing hard skills, technical tools, frameworks, or domain keywords relevant for the target role.
@@ -361,26 +424,37 @@ REQUIRED JSON SCHEMA:
 
   const userContent = `RESUME CONTENT:
 ---
-${extractedText.substring(0, 12000)}
+${sanitizedResumeText.substring(0, 12000)}
 ---
 
 ${jobTitle ? `TARGET JOB TITLE: ${jobTitle}\n` : ''}${jobDescription ? `TARGET JOB DESCRIPTION:\n${jobDescription.substring(0, 4000)}\n` : ''}
 
 Analyze the resume and return STRICT JSON according to the specified schema.`;
 
-  const rawResponseText = await callGeminiApi(systemContext, userContent, { temperature: 0.2 });
+  // Perform AI analysis call with auto-retry on unparseable JSON output
+  const maxAttempts = 2;
+  let lastParseErr = null;
 
-  // Parse and validate AI output
-  try {
-    const cleanedJsonStr = extractJsonString(rawResponseText);
-    const parsedData = JSON.parse(cleanedJsonStr);
-    return validateAnalysisResponse(parsedData);
-  } catch (parseErr) {
-    if (process.env.NODE_ENV === 'development') {
-      console.error('[GEMINI SERVICE ERROR] Failed to parse JSON response:', parseErr.message);
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const rawResponseText = await callGeminiApi(systemContext, userContent, { temperature: 0.2 });
+      const cleanedJsonStr = extractJsonString(rawResponseText);
+      const parsedData = JSON.parse(cleanedJsonStr);
+      return validateAnalysisResponse(parsedData);
+    } catch (parseErr) {
+      lastParseErr = parseErr;
+      if (parseErr.message && parseErr.message.includes('Invalid or unauthorized Gemini API key')) {
+        throw parseErr;
+      }
+      logger.warn(`[GEMINI SERVICE WARNING] Resume analysis JSON parse attempt ${attempt}/${maxAttempts} failed: ${parseErr.message}`);
+      if (attempt < maxAttempts) {
+        await new Promise((res) => setTimeout(res, 1000));
+      }
     }
-    throw new Error('Gemini API returned an unparseable response structure. Please try again.');
   }
+
+  logger.error('[GEMINI SERVICE ERROR] All resume analysis parsing attempts failed:', lastParseErr?.message);
+  throw new Error('Gemini API returned an unparseable response structure. Please try again.');
 };
 
 module.exports = {
@@ -389,6 +463,5 @@ module.exports = {
   extractJsonString,
   fetchWithTimeoutAndRetry,
   callGeminiApi,
+  isApiKeyError,
 };
-
-

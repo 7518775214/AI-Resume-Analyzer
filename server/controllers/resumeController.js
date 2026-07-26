@@ -1,5 +1,6 @@
 const path = require('path');
 const mongoose = require('mongoose');
+const logger = require('../utils/logger');
 const Resume = require('../models/Resume');
 const storageService = require('../services/storageService');
 const parsingService = require('../services/parsingService');
@@ -308,9 +309,7 @@ const analyzeResume = async (req, res) => {
         },
       });
     } catch (aiError) {
-      if (process.env.NODE_ENV === 'development') {
-        console.error(`[RESUME CONTROLLER ERROR] AI analysis failed for resume ${id}:`, aiError);
-      }
+      logger.error(`[RESUME CONTROLLER ERROR] AI analysis failed for resume ${id}: ${aiError.message}`);
       
       // Update analysis status to failed on error
       resume.analysisStatus = 'failed';
@@ -322,9 +321,7 @@ const analyzeResume = async (req, res) => {
       });
     }
   } catch (error) {
-    if (process.env.NODE_ENV === 'development') {
-      console.error('[RESUME CONTROLLER ERROR] Unexpected failure during resume analysis:', error);
-    }
+    logger.error(`[RESUME CONTROLLER ERROR] Unexpected failure during resume analysis: ${error.message}`);
     return res.status(500).json({
       status: 'error',
       message: 'An unexpected internal server error occurred while analyzing the resume.',
