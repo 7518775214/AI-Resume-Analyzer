@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const authenticateToken = require('../middleware/authMiddleware');
 const uploadResumeMiddleware = require('../middleware/uploadMiddleware');
-const { uploadResume, getUserResumes } = require('../controllers/resumeController');
+const { uploadResume, getUserResumes, getResumeById } = require('../controllers/resumeController');
 
 /**
  * Resume Routes
@@ -18,5 +18,10 @@ router.post('/upload', authenticateToken, uploadResumeMiddleware, uploadResume);
 // @desc    Get list of uploaded resumes for authenticated user
 // @access  Private
 router.get('/', authenticateToken, getUserResumes);
+
+// @route   GET /api/resumes/:id
+// @desc    Get single resume details including extracted text
+// @access  Private
+router.get('/:id', authenticateToken, getResumeById);
 
 module.exports = router;

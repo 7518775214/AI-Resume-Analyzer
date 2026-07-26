@@ -50,6 +50,15 @@ const resumeSchema = new mongoose.Schema(
       trim: true,
       maxlength: [10000, 'Job description cannot exceed 10,000 characters'],
     },
+    extractedText: {
+      type: String,
+      default: '',
+    },
+    parsingStatus: {
+      type: String,
+      enum: ['pending', 'completed', 'failed'],
+      default: 'pending',
+    },
     uploadDate: {
       type: Date,
       default: Date.now,
