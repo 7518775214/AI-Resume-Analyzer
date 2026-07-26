@@ -173,14 +173,20 @@ const fetchWithTimeoutAndRetry = async (endpoint, payload, maxRetries = 1, timeo
 };
 
 /**
- * Analyzes resume text using Google Gemini API
+ * Shared helper to call Google Gemini API using @google/generative-ai SDK
+ * with automatic fallback to native fetch if needed.
  * 
- * @param {string} extractedText - Extracted text content from resume PDF/DOCX
- * @param {string} [jobTitle] - Optional target job title
- * @param {string} [jobDescription] - Optional target job description
- * @returns {Promise<object>} Validated analysis object matching required JSON schema
+ * Supported models in order of preference:
+ * 1. gemini-1.5-flash (Fast, efficient, default stable model)
+ * 2. gemini-1.5-pro (High intelligence fallback model)
+ * 3. gemini-2.0-flash (Latest flash model fallback)
+ * 
+ * @param {string} systemContext - System prompt / instructions
+ * @param {string} userContent - User content prompt
+ * @param {object} [generationConfigOverride] - Custom generation parameters
+ * @returns {Promise<string>} Raw text output from Gemini API
  */
-const analyzeResume = async (extractedText, jobTitle = '', jobDescription = '') => {
+const callGeminiApi = async (systemContext, userContent, generationConfigOverride = {}) => {
   const apiKey = process.env.GEMINI_API_KEY;
 
   if (!apiKey || apiKey === 'your_gemini_api_key_here' || apiKey.trim() === '') {
@@ -189,6 +195,135 @@ const analyzeResume = async (extractedText, jobTitle = '', jobDescription = '') 
     );
   }
 
+  const promptText = `${systemContext}\n\n${userContent}`;
+  const models = ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-2.0-flash'];
+  let lastError = null;
+
+  // 1. Try using @google/generative-ai SDK if installed
+  let GoogleGenerativeAI;
+  try {
+    const sdk = require('@google/generative-ai');
+    GoogleGenerativeAI = sdk.GoogleGenerativeAI;
+  } catch (sdkImportErr) {
+    // SDK not installed or failed to load, will use REST fetch fallback
+  }
+
+  if (GoogleGenerativeAI) {
+    const genAI = new GoogleGenerativeAI(apiKey.trim());
+
+    for (const modelName of models) {
+      try {
+        const model = genAI.getGenerativeModel({
+          model: modelName,
+          generationConfig: {
+            responseMimeType: 'application/json',
+            temperature: 0.2,
+            ...generationConfigOverride,
+          },
+        });
+
+        const result = await model.generateContent(promptText);
+        const response = await result.response;
+        const text = response.text();
+
+        if (text && text.trim().length > 0) {
+          return text;
+        }
+      } catch (err) {
+        const errMsg = err.message || String(err);
+        if (process.env.NODE_ENV === 'development') {
+          console.warn(`[GEMINI SERVICE WARNING] SDK call to model '${modelName}' failed: ${errMsg}`);
+        }
+
+        if (
+          errMsg.toLowerCase().includes('api key') ||
+          errMsg.includes('API_KEY_INVALID') ||
+          errMsg.includes('400') ||
+          errMsg.includes('403')
+        ) {
+          if (errMsg.toLowerCase().includes('api key') || errMsg.includes('API_KEY_INVALID')) {
+            throw new Error('Invalid or unauthorized Gemini API key provided.');
+          }
+        }
+
+        lastError = new Error(`Gemini API Error (${modelName}): ${errMsg}`);
+      }
+    }
+  }
+
+  // 2. Fallback to HTTP REST fetch if SDK is not present or SDK attempts failed
+  const requestPayload = {
+    contents: [
+      {
+        parts: [
+          {
+            text: promptText,
+          },
+        ],
+      },
+    ],
+    generationConfig: {
+      responseMimeType: 'application/json',
+      temperature: 0.2,
+      ...generationConfigOverride,
+    },
+  };
+
+  for (const model of models) {
+    try {
+      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey.trim())}`;
+      const response = await fetchWithTimeoutAndRetry(endpoint, requestPayload, 1, 30000);
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        const apiErrMsg = errorData.error?.message || `HTTP ${response.status} ${response.statusText}`;
+
+        if (response.status === 400 || response.status === 401 || response.status === 403) {
+          if (apiErrMsg.toLowerCase().includes('api key')) {
+            throw new Error('Invalid or unauthorized Gemini API key provided.');
+          }
+        }
+
+        if (process.env.NODE_ENV === 'development') {
+          console.warn(`[GEMINI SERVICE WARNING] REST call to model ${model} returned non-OK status: ${apiErrMsg}. Trying next model...`);
+        }
+        lastError = new Error(`Gemini API Error (${model}): ${apiErrMsg}`);
+        continue;
+      }
+
+      const responseData = await response.json();
+      const candidatePart = responseData.candidates?.[0]?.content?.parts?.[0]?.text;
+
+      if (!candidatePart) {
+        lastError = new Error(`Gemini model ${model} returned response with no text content.`);
+        continue;
+      }
+
+      return candidatePart;
+    } catch (err) {
+      if (err.message && err.message.includes('Invalid or unauthorized Gemini API key')) {
+        throw err;
+      }
+      lastError = err;
+    }
+  }
+
+  if (process.env.NODE_ENV === 'development' && lastError) {
+    console.error('[GEMINI SERVICE ERROR] All model attempts failed:', lastError.message);
+  }
+
+  throw lastError || new Error('Failed to obtain response from Gemini API. Please check network connection and API key.');
+};
+
+/**
+ * Analyzes resume text using Google Gemini API
+ * 
+ * @param {string} extractedText - Extracted text content from resume PDF/DOCX
+ * @param {string} [jobTitle] - Optional target job title
+ * @param {string} [jobDescription] - Optional target job description
+ * @returns {Promise<object>} Validated analysis object matching required JSON schema
+ */
+const analyzeResume = async (extractedText, jobTitle = '', jobDescription = '') => {
   if (!extractedText || extractedText.trim().length === 0) {
     throw new Error(
       'Resume content is empty or could not be extracted. Unable to perform AI analysis.'
@@ -233,71 +368,7 @@ ${jobTitle ? `TARGET JOB TITLE: ${jobTitle}\n` : ''}${jobDescription ? `TARGET J
 
 Analyze the resume and return STRICT JSON according to the specified schema.`;
 
-  const requestPayload = {
-    contents: [
-      {
-        parts: [
-          {
-            text: `${systemContext}\n\n${userContent}`,
-          },
-        ],
-      },
-    ],
-    generationConfig: {
-      responseMimeType: 'application/json',
-      temperature: 0.2,
-    },
-  };
-
-  // Supported Gemini API endpoint models in order of preference
-  const models = ['gemini-1.5-flash', 'gemini-2.0-flash', 'gemini-1.5-pro'];
-  let lastError = null;
-  let rawResponseText = null;
-
-  for (const model of models) {
-    try {
-      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey.trim())}`;
-      
-      const response = await fetchWithTimeoutAndRetry(endpoint, requestPayload, 1, 30000);
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        const apiErrMsg = errorData.error?.message || `HTTP ${response.status} ${response.statusText}`;
-        
-        // Handle API key authorization errors
-        if (response.status === 400 || response.status === 401 || response.status === 403) {
-          if (apiErrMsg.toLowerCase().includes('api key')) {
-            throw new Error(`Invalid or unauthorized Gemini API key provided.`);
-          }
-        }
-        
-        console.warn(`[GEMINI SERVICE WARNING] Model ${model} returned non-OK status: ${apiErrMsg}. Trying next model...`);
-        lastError = new Error(`Gemini API Error (${model}): ${apiErrMsg}`);
-        continue;
-      }
-
-      const responseData = await response.json();
-      const candidatePart = responseData.candidates?.[0]?.content?.parts?.[0]?.text;
-
-      if (!candidatePart) {
-        lastError = new Error(`Gemini model ${model} returned response with no text content.`);
-        continue;
-      }
-
-      rawResponseText = candidatePart;
-      break; // Success! Break out of model loop
-    } catch (err) {
-      if (err.message && err.message.includes('Invalid or unauthorized Gemini API key')) {
-        throw err; // Stop model retries if key is invalid
-      }
-      lastError = err;
-    }
-  }
-
-  if (!rawResponseText) {
-    console.error('[GEMINI SERVICE ERROR] All model attempts failed:', lastError?.message || lastError);
-    throw lastError || new Error('Failed to obtain analysis response from Gemini API.');
-  }
+  const rawResponseText = await callGeminiApi(systemContext, userContent, { temperature: 0.2 });
 
   // Parse and validate AI output
   try {
@@ -305,7 +376,9 @@ Analyze the resume and return STRICT JSON according to the specified schema.`;
     const parsedData = JSON.parse(cleanedJsonStr);
     return validateAnalysisResponse(parsedData);
   } catch (parseErr) {
-    console.error('[GEMINI SERVICE ERROR] Failed to parse JSON response:', parseErr.message);
+    if (process.env.NODE_ENV === 'development') {
+      console.error('[GEMINI SERVICE ERROR] Failed to parse JSON response:', parseErr.message);
+    }
     throw new Error('Gemini API returned an unparseable response structure. Please try again.');
   }
 };
@@ -315,5 +388,7 @@ module.exports = {
   validateAnalysisResponse,
   extractJsonString,
   fetchWithTimeoutAndRetry,
+  callGeminiApi,
 };
+
 

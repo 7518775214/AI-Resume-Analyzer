@@ -278,7 +278,9 @@ const analyzeResume = async (req, res) => {
         },
       });
     } catch (aiError) {
-      console.error(`[RESUME CONTROLLER ERROR] AI analysis failed for resume ${id}:`, aiError);
+      if (process.env.NODE_ENV === 'development') {
+        console.error(`[RESUME CONTROLLER ERROR] AI analysis failed for resume ${id}:`, aiError);
+      }
       
       // Update analysis status to failed on error
       resume.analysisStatus = 'failed';
@@ -290,7 +292,9 @@ const analyzeResume = async (req, res) => {
       });
     }
   } catch (error) {
-    console.error('[RESUME CONTROLLER ERROR] Unexpected failure during resume analysis:', error);
+    if (process.env.NODE_ENV === 'development') {
+      console.error('[RESUME CONTROLLER ERROR] Unexpected failure during resume analysis:', error);
+    }
     return res.status(500).json({
       status: 'error',
       message: 'An unexpected internal server error occurred while analyzing the resume.',
@@ -375,7 +379,9 @@ const generateInterviewQuestions = async (req, res) => {
         },
       });
     } catch (aiError) {
-      console.error(`[RESUME CONTROLLER ERROR] Interview questions generation failed for resume ${id}:`, aiError);
+      if (process.env.NODE_ENV === 'development') {
+        console.error(`[RESUME CONTROLLER ERROR] Interview questions generation failed for resume ${id}:`, aiError);
+      }
 
       resume.interviewQuestionsStatus = 'failed';
       await resume.save();
@@ -386,7 +392,9 @@ const generateInterviewQuestions = async (req, res) => {
       });
     }
   } catch (error) {
-    console.error('[RESUME CONTROLLER ERROR] Unexpected failure generating interview questions:', error);
+    if (process.env.NODE_ENV === 'development') {
+      console.error('[RESUME CONTROLLER ERROR] Unexpected failure generating interview questions:', error);
+    }
     return res.status(500).json({
       status: 'error',
       message: 'An unexpected internal server error occurred while generating interview questions.',

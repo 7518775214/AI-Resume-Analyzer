@@ -7,7 +7,7 @@
  * Includes retries, timeout handling, and graceful error handling.
  */
 
-const { extractJsonString, fetchWithTimeoutAndRetry } = require('./geminiService');
+const { extractJsonString, callGeminiApi } = require('./geminiService');
 
 /**
  * Validates and normalizes Gemini AI response into required interview questions schema.
@@ -86,14 +86,6 @@ const validateInterviewQuestionsResponse = (parsed) => {
  * @returns {Promise<object>} Validated interview questions object matching required JSON schema
  */
 const generateInterviewQuestions = async (extractedText, aiAnalysis = null, targetRole = '') => {
-  const apiKey = process.env.GEMINI_API_KEY;
-
-  if (!apiKey || apiKey === 'your_gemini_api_key_here' || apiKey.trim() === '') {
-    throw new Error(
-      'Gemini API key is missing or not configured. Please set GEMINI_API_KEY in server environment variables.'
-    );
-  }
-
   if (!extractedText || typeof extractedText !== 'string' || extractedText.trim().length === 0) {
     throw new Error(
       'Resume content is empty or missing. Unable to generate interview questions.'
@@ -139,75 +131,16 @@ ${extractedText.substring(0, 10000)}
 
 Generate tailored interview questions and preparation tips in STRICT JSON matching the specified schema.`;
 
-  const requestPayload = {
-    contents: [
-      {
-        parts: [
-          {
-            text: `${systemContext}\n\n${userContent}`,
-          },
-        ],
-      },
-    ],
-    generationConfig: {
-      responseMimeType: 'application/json',
-      temperature: 0.3,
-    },
-  };
-
-  const models = ['gemini-1.5-flash', 'gemini-2.0-flash', 'gemini-1.5-pro'];
-  let lastError = null;
-  let rawResponseText = null;
-
-  for (const model of models) {
-    try {
-      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey.trim())}`;
-      const response = await fetchWithTimeoutAndRetry(endpoint, requestPayload, 1, 30000);
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        const apiErrMsg = errorData.error?.message || `HTTP ${response.status} ${response.statusText}`;
-
-        if (response.status === 400 || response.status === 401 || response.status === 403) {
-          if (apiErrMsg.toLowerCase().includes('api key')) {
-            throw new Error('Invalid or unauthorized Gemini API key provided.');
-          }
-        }
-
-        console.warn(`[INTERVIEW AI SERVICE WARNING] Model ${model} returned non-OK status: ${apiErrMsg}. Trying next model...`);
-        lastError = new Error(`Gemini API Error (${model}): ${apiErrMsg}`);
-        continue;
-      }
-
-      const responseData = await response.json();
-      const candidatePart = responseData.candidates?.[0]?.content?.parts?.[0]?.text;
-
-      if (!candidatePart) {
-        lastError = new Error(`Gemini model ${model} returned empty response.`);
-        continue;
-      }
-
-      rawResponseText = candidatePart;
-      break;
-    } catch (err) {
-      if (err.message && err.message.includes('Invalid or unauthorized Gemini API key')) {
-        throw err;
-      }
-      lastError = err;
-    }
-  }
-
-  if (!rawResponseText) {
-    console.error('[INTERVIEW AI SERVICE ERROR] All model attempts failed:', lastError?.message || lastError);
-    throw lastError || new Error('Failed to generate interview questions from Gemini API.');
-  }
+  const rawResponseText = await callGeminiApi(systemContext, userContent, { temperature: 0.3 });
 
   try {
     const cleanedJsonStr = extractJsonString(rawResponseText);
     const parsedData = JSON.parse(cleanedJsonStr);
     return validateInterviewQuestionsResponse(parsedData);
   } catch (parseErr) {
-    console.error('[INTERVIEW AI SERVICE ERROR] JSON parse failure:', parseErr.message);
+    if (process.env.NODE_ENV === 'development') {
+      console.error('[INTERVIEW AI SERVICE ERROR] JSON parse failure:', parseErr.message);
+    }
     throw new Error('Gemini API returned an unparseable response. Please try again.');
   }
 };
@@ -216,3 +149,4 @@ module.exports = {
   generateInterviewQuestions,
   validateInterviewQuestionsResponse,
 };
+
