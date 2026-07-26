@@ -372,7 +372,8 @@ const generateInterviewQuestions = async (req, res) => {
       });
     }
 
-    const effectiveTargetRole = (customTargetRole && typeof customTargetRole === 'string' && customTargetRole.trim()) || resume.jobTitle || 'Software Engineer';
+    const sanitizedCustomRole = typeof customTargetRole === 'string' ? customTargetRole.trim().substring(0, 200) : '';
+    const effectiveTargetRole = sanitizedCustomRole || (resume.jobTitle ? String(resume.jobTitle).trim().substring(0, 200) : '') || 'Software Engineer';
 
     // 3. Mark status as pending
     resume.interviewQuestionsStatus = 'pending';
@@ -389,8 +390,8 @@ const generateInterviewQuestions = async (req, res) => {
       // 5. Save generated questions in MongoDB document
       resume.interviewQuestions = questionsResult;
       resume.interviewQuestionsStatus = 'completed';
-      if (customTargetRole && customTargetRole.trim()) {
-        resume.jobTitle = customTargetRole.trim();
+      if (sanitizedCustomRole) {
+        resume.jobTitle = sanitizedCustomRole;
       }
       await resume.save();
 
@@ -406,9 +407,7 @@ const generateInterviewQuestions = async (req, res) => {
         },
       });
     } catch (aiError) {
-      if (process.env.NODE_ENV === 'development') {
-        console.error(`[RESUME CONTROLLER ERROR] Interview questions generation failed for resume ${id}:`, aiError);
-      }
+      logger.error(`[RESUME CONTROLLER ERROR] Interview questions generation failed for resume ${id}: ${aiError.message}`);
 
       resume.interviewQuestionsStatus = 'failed';
       await resume.save();
@@ -419,9 +418,7 @@ const generateInterviewQuestions = async (req, res) => {
       });
     }
   } catch (error) {
-    if (process.env.NODE_ENV === 'development') {
-      console.error('[RESUME CONTROLLER ERROR] Unexpected failure generating interview questions:', error);
-    }
+    logger.error(`[RESUME CONTROLLER ERROR] Unexpected failure generating interview questions: ${error.message}`);
     return res.status(500).json({
       status: 'error',
       message: 'An unexpected internal server error occurred while generating interview questions.',

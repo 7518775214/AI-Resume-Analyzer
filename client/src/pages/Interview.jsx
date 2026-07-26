@@ -67,6 +67,10 @@ const Interview = () => {
         const resumeData = response.data.resume;
         setActiveResume(resumeData);
         setTargetRoleInput(resumeData.jobTitle || '');
+
+        if (resumeData.interviewQuestionsStatus === 'failed') {
+          setError('Previous AI interview question generation for this resume encountered an error. Click "Generate Questions" to retry.');
+        }
       }
     } catch (err) {
       console.error('[INTERVIEW PAGE] Failed to fetch resume details:', err);
