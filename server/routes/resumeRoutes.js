@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const authenticateToken = require('../middleware/authMiddleware');
 const uploadResumeMiddleware = require('../middleware/uploadMiddleware');
+const { sensitiveLimiter, aiLimiter } = require('../middleware/rateLimiter');
 const {
   uploadResume,
   getUserResumes,
@@ -20,7 +21,7 @@ const {
 // @route   POST /api/resumes/upload
 // @desc    Upload resume PDF/DOCX file and store metadata in MongoDB
 // @access  Private
-router.post('/upload', authenticateToken, uploadResumeMiddleware, uploadResume);
+router.post('/upload', authenticateToken, sensitiveLimiter, uploadResumeMiddleware, uploadResume);
 
 // @route   GET /api/resumes
 // @desc    Get list of uploaded resumes for authenticated user
@@ -40,12 +41,12 @@ router.get('/:id/export-pdf', authenticateToken, exportResumePdf);
 // @route   POST /api/resumes/:id/analyze
 // @desc    Trigger Gemini AI Resume Analysis on extracted text
 // @access  Private
-router.post('/:id/analyze', authenticateToken, analyzeResume);
+router.post('/:id/analyze', authenticateToken, aiLimiter, analyzeResume);
 
 // @route   POST /api/resumes/:id/generate-questions
 // @desc    Trigger Gemini AI Interview Question Generation based on resume & analysis
 // @access  Private
-router.post('/:id/generate-questions', authenticateToken, generateInterviewQuestions);
+router.post('/:id/generate-questions', authenticateToken, aiLimiter, generateInterviewQuestions);
 
 // @route   DELETE /api/resumes/:id
 // @desc    Delete resume document and associated stored file
@@ -53,6 +54,3 @@ router.post('/:id/generate-questions', authenticateToken, generateInterviewQuest
 router.delete('/:id', authenticateToken, deleteResume);
 
 module.exports = router;
-
-
-

@@ -1,6 +1,7 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
+const logger = require('../utils/logger');
 
 /**
  * Helper to construct a sanitized user object (strictly excluding password)
@@ -24,7 +25,7 @@ const formatUserResponse = (user) => ({
  * @access  Public
  * @desc    Registers a new user account with hashed password
  */
-const register = async (req, res) => {
+const register = async (req, res, next) => {
   try {
     const { fullName, email, password } = req.body;
 
@@ -63,20 +64,13 @@ const register = async (req, res) => {
       },
     });
   } catch (error) {
-    // Handle MongoDB duplicate key error (code 11000) as a fallback for race conditions
     if (error.code === 11000) {
       return res.status(409).json({
         status: 'fail',
         message: 'Email is already registered',
       });
     }
-
-    console.error('[AUTH CONTROLLER ERROR] Registration failed:', error);
-
-    return res.status(500).json({
-      status: 'error',
-      message: 'Internal server error',
-    });
+    next(error);
   }
 };
 
@@ -87,7 +81,7 @@ const register = async (req, res) => {
  * @access  Public
  * @desc    Authenticates user credentials and issues a JWT token
  */
-const login = async (req, res) => {
+const login = async (req, res, next) => {
   try {
     const { email, password } = req.body;
 
@@ -115,14 +109,16 @@ const login = async (req, res) => {
     }
 
     // 5. Read JWT secret and expiration from environment variables
-    const jwtSecret = process.env.JWT_SECRET;
+    const secretKey = process.env.JWT_SECRET;
     const jwtExpiresIn = process.env.JWT_EXPIRES_IN || '7d';
 
-    if (!jwtSecret) {
-      console.warn('[AUTH WARNING] JWT_SECRET is not set in environment variables. Using default development secret.');
+    if (!secretKey) {
+      logger.error('[AUTH ERROR] JWT_SECRET missing during token sign.');
+      return res.status(500).json({
+        status: 'error',
+        message: 'Internal server configuration error.',
+      });
     }
-
-    const secretKey = jwtSecret || 'supersecret_jwt_key_ai_resume_analyzer_2026';
 
     // 6. Generate JWT token
     const token = jwt.sign(
@@ -149,12 +145,7 @@ const login = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error('[AUTH CONTROLLER ERROR] Login failed:', error);
-
-    return res.status(500).json({
-      status: 'error',
-      message: 'Internal server error',
-    });
+    next(error);
   }
 };
 
