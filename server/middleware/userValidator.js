@@ -65,6 +65,32 @@ const userRegistrationRules = [
 ];
 
 /**
+ * Validation rules for user login payload
+ */
+const userLoginRules = [
+  // 1. Email Validation
+  body('email')
+    .trim()
+    .notEmpty()
+    .withMessage('Email address is required')
+    .bail()
+    .isString()
+    .withMessage('Email address must be a text string')
+    .bail()
+    .isEmail()
+    .withMessage('Please provide a valid email address')
+    .toLowerCase(),
+
+  // 2. Password Validation
+  body('password')
+    .notEmpty()
+    .withMessage('Password is required')
+    .bail()
+    .isString()
+    .withMessage('Password must be a text string'),
+];
+
+/**
  * Complete middleware array for validating user registration requests.
  * Combines field validation chains with the reusable error-formatting middleware.
  */
@@ -73,7 +99,18 @@ const validateUserRegistration = [
   validate,
 ];
 
+/**
+ * Complete middleware array for validating user login requests.
+ * Combines field validation chains with the reusable error-formatting middleware.
+ */
+const validateUserLogin = [
+  ...userLoginRules,
+  validate,
+];
+
 module.exports = {
   userRegistrationRules,
   validateUserRegistration,
+  userLoginRules,
+  validateUserLogin,
 };

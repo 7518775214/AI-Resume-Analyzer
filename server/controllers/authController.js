@@ -1,5 +1,21 @@
 const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
 const User = require('../models/User');
+
+/**
+ * Helper to construct a sanitized user object (strictly excluding password)
+ * 
+ * @param {Object} user - User document or plain JS object
+ * @returns {Object} Sanitized user response object
+ */
+const formatUserResponse = (user) => ({
+  id: user._id || user.id,
+  fullName: user.fullName,
+  email: user.email,
+  role: user.role,
+  emailVerified: user.emailVerified,
+  createdAt: user.createdAt,
+});
 
 /**
  * Controller to handle user registration
@@ -35,15 +51,8 @@ const register = async (req, res) => {
       password: hashedPassword,
     });
 
-    // 5. Construct sanitized user object (strictly excluding password)
-    const userResponse = {
-      id: newUser._id,
-      fullName: newUser.fullName,
-      email: newUser.email,
-      role: newUser.role,
-      emailVerified: newUser.emailVerified,
-      createdAt: newUser.createdAt,
-    };
+    // 5. Construct sanitized user object
+    const userResponse = formatUserResponse(newUser);
 
     // 6. Return successful registration response
     return res.status(201).json({
@@ -71,6 +80,85 @@ const register = async (req, res) => {
   }
 };
 
+/**
+ * Controller to handle user login
+ * 
+ * @route   POST /api/auth/login
+ * @access  Public
+ * @desc    Authenticates user credentials and issues a JWT token
+ */
+const login = async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    // 1. Normalize email
+    const normalizedEmail = email.toLowerCase().trim();
+
+    // 2. Find user by email with .lean() for high-performance plain JS object query
+    const user = await User.findOne({ email: normalizedEmail }).select('+password').lean();
+
+    // 3. If user does not exist, return 401 Unauthorized
+    if (!user) {
+      return res.status(401).json({
+        status: 'fail',
+        message: 'Invalid email or password',
+      });
+    }
+
+    // 4. Compare password with stored hashed password using bcrypt.compare()
+    const isPasswordValid = await bcrypt.compare(password, user.password);
+    if (!isPasswordValid) {
+      return res.status(401).json({
+        status: 'fail',
+        message: 'Invalid email or password',
+      });
+    }
+
+    // 5. Read JWT secret and expiration from environment variables
+    const jwtSecret = process.env.JWT_SECRET;
+    const jwtExpiresIn = process.env.JWT_EXPIRES_IN || '7d';
+
+    if (!jwtSecret) {
+      console.warn('[AUTH WARNING] JWT_SECRET is not set in environment variables. Using default development secret.');
+    }
+
+    const secretKey = jwtSecret || 'supersecret_jwt_key_ai_resume_analyzer_2026';
+
+    // 6. Generate JWT token
+    const token = jwt.sign(
+      {
+        id: user._id,
+        role: user.role,
+      },
+      secretKey,
+      {
+        expiresIn: jwtExpiresIn,
+      }
+    );
+
+    // 7. Construct sanitized user object (strictly excluding password)
+    const userResponse = formatUserResponse(user);
+
+    // 8. Return success response with JWT token and user details
+    return res.status(200).json({
+      status: 'success',
+      message: 'Login successful',
+      token,
+      data: {
+        user: userResponse,
+      },
+    });
+  } catch (error) {
+    console.error('[AUTH CONTROLLER ERROR] Login failed:', error);
+
+    return res.status(500).json({
+      status: 'error',
+      message: 'Internal server error',
+    });
+  }
+};
+
 module.exports = {
   register,
+  login,
 };
