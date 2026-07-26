@@ -15,6 +15,8 @@ import Profile from '../pages/Profile';
 import Settings from '../pages/Settings';
 import NotFound from '../pages/NotFound';
 
+import ProtectedRoute from './ProtectedRoute';
+
 const AppRoutes = () => {
   return (
     <Routes>
@@ -26,14 +28,16 @@ const AppRoutes = () => {
       </Route>
 
       {/* Authenticated Workspace Pages */}
-      <Route element={<MainLayout />}>
-        <Route path="/dashboard" element={<Dashboard />} />
-        <Route path="/upload" element={<ResumeUpload />} />
-        <Route path="/analysis" element={<ResumeAnalysis />} />
-        <Route path="/interview" element={<Interview />} />
-        <Route path="/reports" element={<Reports />} />
-        <Route path="/profile" element={<Profile />} />
-        <Route path="/settings" element={<Settings />} />
+      <Route element={<ProtectedRoute />}>
+        <Route element={<MainLayout />}>
+          <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/upload" element={<ResumeUpload />} />
+          <Route path="/analysis" element={<ResumeAnalysis />} />
+          <Route path="/interview" element={<Interview />} />
+          <Route path="/reports" element={<Reports />} />
+          <Route path="/profile" element={<Profile />} />
+          <Route path="/settings" element={<Settings />} />
+        </Route>
       </Route>
 
       {/* 404 Catch All */}

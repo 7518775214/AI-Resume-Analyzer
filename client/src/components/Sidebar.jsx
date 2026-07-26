@@ -1,6 +1,7 @@
 import React from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import Icon from './Icon';
+import useAuth from '../hooks/useAuth';
 
 const menuItems = [
   { label: 'Dashboard', path: '/dashboard', icon: 'layoutDashboard' },
@@ -14,6 +15,14 @@ const menuItems = [
 
 const Sidebar = () => {
   const location = useLocation();
+  const navigate = useNavigate();
+  const { logout } = useAuth();
+
+  const handleLogout = (e) => {
+    e.preventDefault();
+    logout();
+    navigate('/login');
+  };
 
   return (
     <aside className="w-64 bg-slate-950/60 border-r border-slate-800/80 flex flex-col shrink-0 min-h-[calc(100vh-4rem)] p-4">
@@ -55,13 +64,13 @@ const Sidebar = () => {
           </p>
         </div>
 
-        <Link
-          to="/login"
-          className="flex items-center space-x-3 px-3.5 py-2 rounded-xl text-xs font-semibold text-rose-400 hover:bg-rose-500/10 transition-colors"
+        <button
+          onClick={handleLogout}
+          className="w-full flex items-center space-x-3 px-3.5 py-2 rounded-xl text-xs font-semibold text-rose-400 hover:bg-rose-500/10 transition-colors text-left"
         >
           <Icon name="logOut" className="w-4 h-4" />
           <span>Sign Out</span>
-        </Link>
+        </button>
       </div>
     </aside>
   );

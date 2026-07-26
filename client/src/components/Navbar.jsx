@@ -2,12 +2,19 @@ import React, { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import Icon from './Icon';
 import Button from './Button';
+import useAuth from '../hooks/useAuth';
 
 const Navbar = ({ isAppLayout = false }) => {
   const location = useLocation();
+  const { user, isAuthenticated, logout } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const isActive = (path) => location.pathname === path;
+
+  // Format user display name (e.g. "Alex Morgan" -> "Alex M.")
+  const displayName = user?.fullName
+    ? user.fullName.split(' ').map((n, i, arr) => (i === 0 ? n : i === arr.length - 1 ? `${n[0]}.` : '')).join(' ')
+    : 'User';
 
   return (
     <header className="sticky top-0 z-40 bg-slate-950/80 backdrop-blur-xl border-b border-slate-800/80">
@@ -70,7 +77,7 @@ const Navbar = ({ isAppLayout = false }) => {
 
         {/* Right CTA / Auth Action Buttons */}
         <div className="hidden md:flex items-center space-x-3">
-          {!isAppLayout ? (
+          {!isAuthenticated ? (
             <>
               <Link to="/login">
                 <Button variant="ghost" size="sm">
@@ -90,12 +97,10 @@ const Navbar = ({ isAppLayout = false }) => {
                 <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-indigo-500" />
               </button>
               <Link to="/profile" className="flex items-center space-x-2 pl-2 border-l border-slate-800">
-                <img
-                  src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80"
-                  alt="User Avatar"
-                  className="w-8 h-8 rounded-full border border-indigo-500/30 object-cover"
-                />
-                <span className="text-xs font-semibold text-slate-200">Alex M.</span>
+                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-cyan-500 flex items-center justify-center text-white text-xs font-bold border border-indigo-500/30">
+                  {user?.fullName ? user.fullName.charAt(0).toUpperCase() : 'U'}
+                </div>
+                <span className="text-xs font-semibold text-slate-200">{displayName}</span>
               </Link>
             </div>
           )}
@@ -142,16 +147,32 @@ const Navbar = ({ isAppLayout = false }) => {
             AI Interview
           </Link>
           <div className="pt-3 border-t border-slate-800 flex flex-col gap-2">
-            <Link to="/login" onClick={() => setMobileMenuOpen(false)}>
-              <Button variant="outline" size="sm" fullWidth>
-                Sign In
+            {!isAuthenticated ? (
+              <>
+                <Link to="/login" onClick={() => setMobileMenuOpen(false)}>
+                  <Button variant="outline" size="sm" fullWidth>
+                    Sign In
+                  </Button>
+                </Link>
+                <Link to="/register" onClick={() => setMobileMenuOpen(false)}>
+                  <Button variant="primary" size="sm" fullWidth>
+                    Get Started
+                  </Button>
+                </Link>
+              </>
+            ) : (
+              <Button
+                variant="outline"
+                size="sm"
+                fullWidth
+                onClick={() => {
+                  setMobileMenuOpen(false);
+                  logout();
+                }}
+              >
+                Sign Out
               </Button>
-            </Link>
-            <Link to="/register" onClick={() => setMobileMenuOpen(false)}>
-              <Button variant="primary" size="sm" fullWidth>
-                Get Started
-              </Button>
-            </Link>
+            )}
           </div>
         </div>
       )}

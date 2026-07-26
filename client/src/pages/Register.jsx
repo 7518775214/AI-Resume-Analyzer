@@ -1,12 +1,15 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import Button from '../components/Button';
 import Card from '../components/Card';
 import Input from '../components/Input';
 import Icon from '../components/Icon';
+import useAuth from '../hooks/useAuth';
 
 const Register = () => {
   const navigate = useNavigate();
+  const { register, isAuthenticated, error: authError, clearError } = useAuth();
+
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -14,19 +17,46 @@ const Register = () => {
     targetRole: 'Senior Full Stack Developer'
   });
   const [isLoading, setIsLoading] = useState(false);
+  const [localError, setLocalError] = useState('');
+
+  // Redirect authenticated users away from Register page
+  useEffect(() => {
+    if (isAuthenticated) {
+      navigate('/dashboard', { replace: true });
+    }
+  }, [isAuthenticated, navigate]);
 
   const handleChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
+    if (localError || authError) {
+      setLocalError('');
+      clearError();
+    }
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
+    setLocalError('');
+    clearError();
     setIsLoading(true);
-    setTimeout(() => {
-      setIsLoading(false);
-      navigate('/dashboard');
-    }, 800);
+
+    const payload = {
+      fullName: formData.name,
+      email: formData.email,
+      password: formData.password,
+    };
+
+    const result = await register(payload);
+    setIsLoading(false);
+
+    if (result.success) {
+      navigate('/dashboard', { replace: true });
+    } else {
+      setLocalError(result.message || 'Registration failed. Please check your information.');
+    }
   };
+
+  const displayError = localError || authError;
 
   return (
     <div className="min-h-[calc(100vh-8rem)] flex items-center justify-center p-4 py-12">
@@ -40,6 +70,13 @@ const Register = () => {
         </div>
 
         <Card className="shadow-2xl">
+          {displayError && (
+            <div className="mb-4 p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs flex items-start space-x-2">
+              <Icon name="alertCircle" className="w-4 h-4 mt-0.5 shrink-0" />
+              <span>{displayError}</span>
+            </div>
+          )}
+
           <form onSubmit={handleSubmit} className="space-y-4">
             <Input
               label="Full Name"
@@ -49,6 +86,7 @@ const Register = () => {
               onChange={handleChange}
               icon={<Icon name="user" className="w-4 h-4" />}
               required
+              disabled={isLoading}
             />
 
             <Input
@@ -60,6 +98,7 @@ const Register = () => {
               onChange={handleChange}
               icon={<Icon name="mail" className="w-4 h-4" />}
               required
+              disabled={isLoading}
             />
 
             <Input
@@ -77,6 +116,7 @@ const Register = () => {
                 'Data Engineer / AI Specialist'
               ]}
               icon={<Icon name="target" className="w-4 h-4" />}
+              disabled={isLoading}
             />
 
             <Input
@@ -88,6 +128,7 @@ const Register = () => {
               onChange={handleChange}
               icon={<Icon name="lock" className="w-4 h-4" />}
               required
+              disabled={isLoading}
             />
 
             <div className="flex items-start space-x-2 text-xs pt-1">

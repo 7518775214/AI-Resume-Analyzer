@@ -1,29 +1,72 @@
-import React, { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import Button from '../components/Button';
 import Card from '../components/Card';
 import Input from '../components/Input';
 import Icon from '../components/Icon';
+import useAuth from '../hooks/useAuth';
 
 const Login = () => {
   const navigate = useNavigate();
+  const location = useLocation();
+  const { login, isAuthenticated, error: authError, clearError } = useAuth();
+
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [localError, setLocalError] = useState('');
 
-  const handleSubmit = (e) => {
+  const from = location.state?.from?.pathname || '/dashboard';
+
+  // Redirect authenticated users away from Login page
+  useEffect(() => {
+    if (isAuthenticated) {
+      navigate(from, { replace: true });
+    }
+  }, [isAuthenticated, navigate, from]);
+
+  const handleEmailChange = (e) => {
+    setEmail(e.target.value);
+    if (localError || authError) {
+      setLocalError('');
+      clearError();
+    }
+  };
+
+  const handlePasswordChange = (e) => {
+    setPassword(e.target.value);
+    if (localError || authError) {
+      setLocalError('');
+      clearError();
+    }
+  };
+
+  const handleSubmit = async (e) => {
     e.preventDefault();
+    setLocalError('');
+    clearError();
     setIsLoading(true);
-    setTimeout(() => {
-      setIsLoading(false);
-      navigate('/dashboard');
-    }, 800);
+
+    const result = await login(email, password);
+    setIsLoading(false);
+
+    if (result.success) {
+      navigate(from, { replace: true });
+    } else {
+      setLocalError(result.message || 'Login failed. Invalid credentials.');
+    }
   };
 
   const handleFillDemo = () => {
     setEmail('alex.morgan@example.com');
     setPassword('demoPass123!');
+    if (localError || authError) {
+      setLocalError('');
+      clearError();
+    }
   };
+
+  const displayError = localError || authError;
 
   return (
     <div className="min-h-[calc(100vh-8rem)] flex items-center justify-center p-4 py-12">
@@ -37,15 +80,23 @@ const Login = () => {
         </div>
 
         <Card className="shadow-2xl">
+          {displayError && (
+            <div className="mb-4 p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs flex items-start space-x-2">
+              <Icon name="alertCircle" className="w-4 h-4 mt-0.5 shrink-0" />
+              <span>{displayError}</span>
+            </div>
+          )}
+
           <form onSubmit={handleSubmit} className="space-y-4">
             <Input
               label="Email Address"
               type="email"
               placeholder="you@example.com"
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={handleEmailChange}
               icon={<Icon name="mail" className="w-4 h-4" />}
               required
+              disabled={isLoading}
             />
 
             <Input
@@ -53,9 +104,10 @@ const Login = () => {
               type="password"
               placeholder="••••••••"
               value={password}
-              onChange={(e) => setPassword(e.target.value)}
+              onChange={handlePasswordChange}
               icon={<Icon name="lock" className="w-4 h-4" />}
               required
+              disabled={isLoading}
             />
 
             <div className="flex items-center justify-between text-xs pt-1">
@@ -77,6 +129,7 @@ const Login = () => {
               size="sm"
               fullWidth
               onClick={handleFillDemo}
+              disabled={isLoading}
               icon={<Icon name="user" className="w-4 h-4 text-indigo-400" />}
             >
               Fill Demo User Credentials
