@@ -106,7 +106,7 @@ const uploadResume = async (req, res) => {
 };
 
 /**
- * Controller to fetch authenticated user's uploaded resumes
+ * Controller to fetch authenticated user's uploaded resumes with pagination support
  * 
  * @route   GET /api/resumes
  * @access  Private (Protected by JWT)
@@ -121,12 +121,30 @@ const getUserResumes = async (req, res) => {
       });
     }
 
-    const resumes = await Resume.find({ userId }).sort({ uploadDate: -1 }).lean();
+    // Parse and sanitize pagination parameters (cap max limit to 50 for security and resource protection)
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(50, Math.max(1, parseInt(req.query.limit, 10) || 10));
+    const skip = (page - 1) * limit;
+
+    const total = await Resume.countDocuments({ userId });
+    
+    // Select specific list fields to optimize query execution and payload size
+    const resumes = await Resume.find({ userId })
+      .select('originalFileName storedFileName fileUrl fileType fileSize jobTitle jobDescription parsingStatus analysisStatus interviewQuestionsStatus analysis.atsScore uploadDate createdAt updatedAt')
+      .sort({ uploadDate: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean();
+
+    const totalPages = Math.ceil(total / limit) || 1;
 
     return res.status(200).json({
       status: 'success',
       data: {
         count: resumes.length,
+        total,
+        page,
+        totalPages,
         resumes,
       },
     });
@@ -375,12 +393,72 @@ const generateInterviewQuestions = async (req, res) => {
   }
 };
 
+/**
+ * Controller to delete a resume document and its stored physical file
+ * 
+ * @route   DELETE /api/resumes/:id
+ * @access  Private (Protected by JWT)
+ */
+const deleteResume = async (req, res) => {
+  try {
+    const userId = req.user?.id;
+    const { id } = req.params;
+
+    if (!userId) {
+      return res.status(401).json({
+        status: 'fail',
+        message: 'Unauthorized access.',
+      });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid resume ID format.',
+      });
+    }
+
+    // 1. Fetch resume document belonging to authenticated user
+    const resume = await Resume.findOne({ _id: id, userId });
+    if (!resume) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Resume document not found.',
+      });
+    }
+
+    // 2. Delete stored physical file using Storage Service abstraction
+    if (resume.storedFileName) {
+      await storageService.deleteFile(resume.storedFileName);
+    }
+
+    // 3. Delete database record
+    await Resume.deleteOne({ _id: id, userId });
+
+    return res.status(200).json({
+      status: 'success',
+      message: 'Resume and associated files deleted successfully.',
+      data: {
+        id: id,
+      },
+    });
+  } catch (error) {
+    console.error('[RESUME CONTROLLER ERROR] Failed to delete resume:', error);
+    return res.status(500).json({
+      status: 'error',
+      message: 'Internal server error while deleting resume.',
+    });
+  }
+};
+
 module.exports = {
   uploadResume,
   getUserResumes,
   getResumeById,
   analyzeResume,
   generateInterviewQuestions,
+  deleteResume,
 };
+
 
 

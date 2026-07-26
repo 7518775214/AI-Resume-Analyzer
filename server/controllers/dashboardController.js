@@ -1,4 +1,5 @@
 const User = require('../models/User');
+const dashboardService = require('../services/dashboardService');
 
 /**
  * Controller to handle fetching dashboard overview and metrics for authenticated user
@@ -30,7 +31,9 @@ const getDashboard = async (req, res) => {
       });
     }
 
-    // 4. Prepare dashboard summary statistics and recent activity placeholders
+    // 4. Retrieve dashboard metrics from dashboard service
+    const stats = await dashboardService.getUserDashboardStats(user._id);
+
     const dashboardData = {
       user: {
         id: user._id,
@@ -39,11 +42,11 @@ const getDashboard = async (req, res) => {
         role: user.role,
       },
       stats: {
-        resumesAnalyzed: 0,
-        interviewsCompleted: 0,
-        averageScore: 0,
+        totalResumes: stats.totalResumes,
+        totalAnalyses: stats.totalAnalyses,
+        totalInterviewSessions: stats.totalInterviewSessions,
+        avgAtsScore: stats.avgAtsScore,
       },
-      recentActivity: [],
     };
 
     // 5. Return successful JSON response
@@ -73,3 +76,4 @@ const getDashboard = async (req, res) => {
 module.exports = {
   getDashboard,
 };
+

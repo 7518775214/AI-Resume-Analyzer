@@ -30,11 +30,15 @@ const resumeService = {
   },
 
   /**
-   * Fetches list of uploaded resumes for authenticated user
-   * @returns {Promise<object>} API response object with resumes list
+   * Fetches list of uploaded resumes for authenticated user with optional pagination
+   * @param {number} [page=1] - Target page number
+   * @param {number} [limit=10] - Items per page
+   * @returns {Promise<object>} API response object with resumes list and pagination metadata
    */
-  getUserResumes: async () => {
-    const response = await api.get('/resumes');
+  getUserResumes: async (page = 1, limit = 10) => {
+    const response = await api.get('/resumes', {
+      params: { page, limit },
+    });
     return response.data;
   },
 
@@ -68,8 +72,19 @@ const resumeService = {
     const response = await api.post(`/resumes/${id}/generate-questions`, { targetRole });
     return response.data;
   },
+
+  /**
+   * Deletes a resume document and its associated file by ID
+   * @param {string} id - Resume document ID
+   * @returns {Promise<object>} API response object confirming deletion
+   */
+  deleteResume: async (id) => {
+    const response = await api.delete(`/resumes/${id}`);
+    return response.data;
+  },
 };
 
 export default resumeService;
+
 
 

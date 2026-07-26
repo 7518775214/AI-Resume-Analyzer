@@ -8,6 +8,7 @@ const {
   getResumeById,
   analyzeResume,
   generateInterviewQuestions,
+  deleteResume,
 } = require('../controllers/resumeController');
 
 /**
@@ -40,6 +41,12 @@ router.post('/:id/analyze', authenticateToken, analyzeResume);
 // @access  Private
 router.post('/:id/generate-questions', authenticateToken, generateInterviewQuestions);
 
+// @route   DELETE /api/resumes/:id
+// @desc    Delete resume document and associated stored file
+// @access  Private
+router.delete('/:id', authenticateToken, deleteResume);
+
 module.exports = router;
+
 
 
