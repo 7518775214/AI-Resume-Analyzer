@@ -13,11 +13,12 @@ export const AuthProvider = ({ children }) => {
    * Helper function to extract clear error message from backend API error response
    */
   const extractErrorMessage = useCallback((err) => {
-    if (err.response?.data?.message) {
-      return err.response.data.message;
+    const data = err.data || err.response?.data;
+    if (data?.errors && Array.isArray(data.errors) && data.errors.length > 0) {
+      return data.errors.map((e) => e.msg || e.message).join(', ');
     }
-    if (err.response?.data?.errors && Array.isArray(err.response.data.errors) && err.response.data.errors.length > 0) {
-      return err.response.data.errors.map((e) => e.msg || e.message).join(', ');
+    if (data?.message) {
+      return data.message;
     }
     return err.message || 'An unexpected error occurred. Please try again.';
   }, []);

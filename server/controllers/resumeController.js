@@ -27,35 +27,65 @@ const uploadResume = async (req, res) => {
       });
     }
 
-    // 2. Validate file presence from Multer
-    if (!req.file) {
+    // 2. Validate file presence from Multer and check file size > 0
+    if (!req.file || !req.file.size || req.file.size === 0) {
+      if (req.file?.filename) {
+        await storageService.deleteFile(req.file.filename);
+      }
       return res.status(400).json({
         status: 'fail',
-        message: 'No resume file provided. Please select a valid PDF or DOCX file.',
+        message: 'Uploaded file is empty (0 bytes). Please select a valid PDF or DOCX file.',
       });
     }
 
     const { originalname, filename, mimetype, size, path: multerPath } = req.file;
-    const { jobTitle, jobDescription } = req.body;
+    const { jobTitle, jobDescription } = req.body || {};
 
     // Sanitize original filename to prevent path traversal or unsafe characters
     const sanitizedOriginalName = path.basename(originalname);
 
-    // 3. Generate accessible file URL using Storage Service
+    // Sanitize and enforce length boundaries on job metadata
+    const sanitizedJobTitle = typeof jobTitle === 'string' ? jobTitle.trim().slice(0, 200) : '';
+    const sanitizedJobDesc = typeof jobDescription === 'string' ? jobDescription.trim().slice(0, 10000) : '';
+
+    // 3. Duplicate Resume Detection & Physical File Cleanup
+    // If user uploads an identical file (same name & size), clean up old file from disk & DB
+    const existingDuplicate = await Resume.findOne({
+      userId: userId,
+      originalFileName: sanitizedOriginalName,
+      fileSize: size,
+    });
+
+    if (existingDuplicate) {
+      if (existingDuplicate.storedFileName) {
+        await storageService.deleteFile(existingDuplicate.storedFileName);
+      }
+      await Resume.deleteOne({ _id: existingDuplicate._id });
+    }
+
+    // 4. Generate accessible file URL using Storage Service
     const fileUrl = storageService.getFileUrl(filename, req);
 
-    // 4. Parse resume text automatically using Parsing Service
+    // 5. Parse resume text automatically using Parsing Service
     const filePath = multerPath || path.join(storageService.uploadDir, filename);
     let extractedText = '';
     let parsingStatus = 'completed';
+
     try {
       extractedText = await parsingService.parseResume(filePath, mimetype);
     } catch (parseError) {
-      console.warn(`[RESUME CONTROLLER] Parsing failed gracefully for ${filename}:`, parseError.message);
-      parsingStatus = 'failed';
+      console.warn(`[RESUME CONTROLLER] Parsing failed for ${filename}:`, parseError.message);
+      
+      // Clean up uploaded file from disk if parsing encounters a unrecoverable error or corrupted file
+      await storageService.deleteFile(filename);
+
+      return res.status(400).json({
+        status: 'fail',
+        message: parseError.message || 'Failed to parse resume content. Please ensure the file is not corrupted or password protected.',
+      });
     }
 
-    // 5. Create and save Resume metadata document in MongoDB with extracted text
+    // 6. Create and save Resume metadata document in MongoDB with extracted text
     const newResume = await Resume.create({
       userId: userId,
       originalFileName: sanitizedOriginalName,
@@ -63,14 +93,14 @@ const uploadResume = async (req, res) => {
       fileUrl: fileUrl,
       fileType: mimetype,
       fileSize: size,
-      jobTitle: jobTitle ? jobTitle.trim() : '',
-      jobDescription: jobDescription ? jobDescription.trim() : '',
+      jobTitle: sanitizedJobTitle,
+      jobDescription: sanitizedJobDesc,
       extractedText: extractedText,
       parsingStatus: parsingStatus,
       uploadDate: new Date(),
     });
 
-    // 6. Return success response with resume metadata and extracted text
+    // 7. Return success response with resume metadata and extracted text
     return res.status(201).json({
       status: 'success',
       message: 'Resume uploaded and parsed successfully.',
@@ -101,7 +131,7 @@ const uploadResume = async (req, res) => {
 
     return res.status(500).json({
       status: 'error',
-      message: 'An error occurred while saving resume metadata. Please try again.',
+      message: error.message || 'An error occurred while saving resume metadata. Please try again.',
     });
   }
 };

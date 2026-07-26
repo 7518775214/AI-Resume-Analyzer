@@ -18,6 +18,14 @@ const Login = () => {
 
   const from = location.state?.from?.pathname || '/dashboard';
 
+  // Check for expired session query parameter
+  useEffect(() => {
+    const searchParams = new URLSearchParams(location.search);
+    if (searchParams.get('expired') === 'true') {
+      setLocalError('Your session has expired. Please log in again.');
+    }
+  }, [location.search]);
+
   // Redirect authenticated users away from Login page
   useEffect(() => {
     if (isAuthenticated) {

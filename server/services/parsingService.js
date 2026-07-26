@@ -42,16 +42,21 @@ class ParsingService {
   }
 
   /**
-   * Automatically detect document format using magic bytes first, falling back to MIME/extension.
+   * Automatically detect document format using magic bytes.
+   * Enforces strict magic byte validation to prevent file spoofing attacks.
    * 
    * @param {Buffer} buffer - File content buffer
    * @param {string} mimeType - Uploaded MIME type
    * @param {string} filePath - Path to stored file
    * @returns {'pdf' | 'docx'} Detected supported format
-   * @throws {Error} If format is unsupported or spoofed
+   * @throws {Error} If format is unsupported, corrupted, or spoofed
    */
   detectFileType(buffer, mimeType, filePath) {
-    // 1. Try magic bytes first (most secure & reliable)
+    if (!buffer || buffer.length === 0) {
+      throw new Error('Uploaded file is empty (0 bytes).');
+    }
+
+    // 1. Validate magic bytes (file signatures)
     const magicFormat = this.detectFormatFromBuffer(buffer);
 
     if (magicFormat === 'pdf') return 'pdf';
@@ -60,22 +65,8 @@ class ParsingService {
       throw new Error('Legacy binary Word documents (.doc) are not supported. Please convert to .docx or PDF format.');
     }
 
-    // 2. Fallback to MIME type and extension if magic bytes are indeterminate
-    const normalizedMime = (mimeType || '').toLowerCase().trim();
-    const ext = path.extname(filePath || '').toLowerCase();
-
-    if (normalizedMime === 'application/pdf' || ext === '.pdf') {
-      return 'pdf';
-    }
-
-    if (
-      normalizedMime === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
-      ext === '.docx'
-    ) {
-      return 'docx';
-    }
-
-    throw new Error(`Unsupported or invalid file format: MIME '${mimeType}', Extension '${ext}'. Only valid PDF and DOCX files are supported.`);
+    // Strict security check: Do not fall back to client headers/extensions if magic bytes fail
+    throw new Error('Invalid or corrupted document header. Magic byte security check failed for uploaded file.');
   }
 
   /**
@@ -144,6 +135,10 @@ class ParsingService {
       // 1. Read file buffer
       const fileBuffer = await fs.promises.readFile(resolvedPath);
 
+      if (!fileBuffer || fileBuffer.length === 0) {
+        throw new Error('Uploaded file is empty (0 bytes).');
+      }
+
       // 2. Detect format with magic byte validation
       const format = this.detectFileType(fileBuffer, mimeType, resolvedPath);
 
@@ -158,8 +153,8 @@ class ParsingService {
       // 4. Clean and normalize extracted text
       const cleanedText = cleanExtractedText(rawText);
 
-      if (!cleanedText) {
-        console.warn(`[PARSING SERVICE] Warning: Extracted text is empty for file ${path.basename(resolvedPath)}. Document may be image-based or empty.`);
+      if (!cleanedText || cleanedText.trim() === '') {
+        throw new Error('No readable text could be extracted from document. The file may be password protected, empty, or a scanned image PDF.');
       }
 
       return cleanedText;

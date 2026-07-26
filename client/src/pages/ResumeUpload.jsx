@@ -10,11 +10,10 @@ import resumeService from '../services/resumeService';
 import useAuth from '../hooks/useAuth';
 
 const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024; // 5 MB
-const ALLOWED_EXTENSIONS = ['.pdf', '.docx', '.doc'];
+const ALLOWED_EXTENSIONS = ['.pdf', '.docx'];
 const ALLOWED_MIME_TYPES = [
   'application/pdf',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  'application/msword',
 ];
 
 const ResumeUpload = () => {
@@ -41,13 +40,19 @@ const ResumeUpload = () => {
       return false;
     }
 
+    // 0. Validate Non-empty file (size > 0)
+    if (!file.size || file.size === 0) {
+      setError('Selected file is empty (0 bytes). Please upload a valid PDF or DOCX document.');
+      return false;
+    }
+
     // 1. Validate File Extension & MIME Type
     const fileName = file.name.toLowerCase();
     const hasValidExt = ALLOWED_EXTENSIONS.some((ext) => fileName.endsWith(ext));
     const hasValidMime = ALLOWED_MIME_TYPES.includes(file.type);
 
     if (!hasValidExt || (file.type && !hasValidMime)) {
-      setError('Invalid file format. Please upload a PDF (.pdf) or Word document (.docx, .doc).');
+      setError('Invalid file format. Please upload a PDF (.pdf) or Word document (.docx).');
       return false;
     }
 
@@ -263,7 +268,7 @@ const ResumeUpload = () => {
               >
                 <input
                   type="file"
-                  accept=".pdf,.docx,.doc,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword"
+                  accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                   onChange={handleFileChange}
                   disabled={isUploading}
                   className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10 disabled:cursor-not-allowed"
@@ -369,7 +374,7 @@ const ResumeUpload = () => {
             <ul className="space-y-3 text-xs text-slate-300">
               <li className="flex items-start space-x-2">
                 <span className="text-indigo-400 font-bold">•</span>
-                <span>Supported file types are strictly PDF (.pdf) and Microsoft Word (.docx, .doc).</span>
+                <span>Supported file types are strictly PDF (.pdf) and Microsoft Word (.docx).</span>
               </li>
               <li className="flex items-start space-x-2">
                 <span className="text-indigo-400 font-bold">•</span>

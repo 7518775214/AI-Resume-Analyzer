@@ -2,20 +2,21 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 
+const storageService = require('../services/storageService');
+
 // Ensure uploads folder exists
 const uploadDir = path.join(__dirname, '..', 'uploads');
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
 }
 
-// 1. Allowed MIME Types and Extensions
+// 1. Allowed MIME Types and Extensions (Strictly PDF and DOCX)
 const allowedMimeTypes = [
   'application/pdf',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  'application/msword',
 ];
 
-const allowedExtensions = ['.pdf', '.docx', '.doc'];
+const allowedExtensions = ['.pdf', '.docx'];
 
 // 2. Configure Multer Disk Storage safely
 const storage = multer.diskStorage({
@@ -45,7 +46,7 @@ const fileFilter = (req, file, cb) => {
     return cb(null, true);
   }
 
-  const error = new Error('Invalid file format. Only PDF (.pdf) and Word (.docx, .doc) files are accepted.');
+  const error = new Error('Invalid file format. Only PDF (.pdf) and Word (.docx) files are accepted.');
   error.code = 'INVALID_FILE_TYPE';
   return cb(error, false);
 };
@@ -62,12 +63,18 @@ const upload = multer({
 /**
  * Custom Express Middleware Wrapper for Multer Upload
  * Catches Multer upload errors (size limit, file type filter) and returns structured JSON responses.
+ * Ensures temporary files are deleted if Multer encounters an error.
  */
 const uploadResumeMiddleware = (req, res, next) => {
   const uploadSingle = upload.single('resume');
 
-  uploadSingle(req, res, (err) => {
+  uploadSingle(req, res, async (err) => {
     if (err) {
+      // Clean up orphaned temp file if Multer created one before failing
+      if (req.file?.filename) {
+        await storageService.deleteFile(req.file.filename);
+      }
+
       if (err instanceof multer.MulterError) {
         if (err.code === 'LIMIT_FILE_SIZE') {
           return res.status(400).json({
