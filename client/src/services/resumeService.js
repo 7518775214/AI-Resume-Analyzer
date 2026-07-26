@@ -30,14 +30,18 @@ const resumeService = {
   },
 
   /**
-   * Fetches list of uploaded resumes for authenticated user with optional pagination
+   * Fetches list of uploaded resumes for authenticated user with optional pagination, search, filtering and sorting
    * @param {number} [page=1] - Target page number
    * @param {number} [limit=10] - Items per page
+   * @param {string} [search=''] - Search term for file name or job title
+   * @param {string} [status=''] - Filter by analysis status (completed, pending, failed, all)
+   * @param {string} [sortBy='uploadDate'] - Sort field (uploadDate, atsScore, fileName)
+   * @param {string} [sortOrder='desc'] - Sort order (asc, desc)
    * @returns {Promise<object>} API response object with resumes list and pagination metadata
    */
-  getUserResumes: async (page = 1, limit = 10) => {
+  getUserResumes: async (page = 1, limit = 10, search = '', status = '', sortBy = 'uploadDate', sortOrder = 'desc') => {
     const response = await api.get('/resumes', {
-      params: { page, limit },
+      params: { page, limit, search, status, sortBy, sortOrder },
     });
     return response.data;
   },

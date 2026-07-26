@@ -20,7 +20,7 @@ const Dashboard = () => {
     totalResumes: 0,
     totalAnalyses: 0,
     totalInterviewSessions: 0,
-    avgAtsScore: 0,
+    avgAtsScore: null,
   });
   const [isLoadingStats, setIsLoadingStats] = useState(true);
 
@@ -31,6 +31,12 @@ const Dashboard = () => {
   const [limit] = useState(5);
   const [totalPages, setTotalPages] = useState(1);
   const [totalResumesCount, setTotalResumesCount] = useState(0);
+
+  // Search, Filter & Sort State
+  const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
+  const [sortBy, setSortBy] = useState('uploadDate');
+  const [sortOrder, setSortOrder] = useState('desc');
 
   // Delete Modal & Action State
   const [deleteResumeTarget, setDeleteResumeTarget] = useState(null);
@@ -70,13 +76,19 @@ const Dashboard = () => {
     }
   }, []);
 
-  // Fetch Resumes with Pagination
-  const fetchResumes = useCallback(async (currentPage = 1) => {
+  // Fetch Resumes with Pagination, Search, Filter and Sorting
+  const fetchResumes = useCallback(async (
+    currentPage = 1,
+    search = searchQuery,
+    status = statusFilter,
+    sort = sortBy,
+    order = sortOrder
+  ) => {
     if (!isMountedRef.current) return;
     setIsLoadingResumes(true);
     setError(null);
     try {
-      const response = await resumeService.getUserResumes(currentPage, limit);
+      const response = await resumeService.getUserResumes(currentPage, limit, search, status, sort, order);
       if (isMountedRef.current && response.status === 'success' && response.data) {
         setResumes(response.data.resumes || []);
         setPage(response.data.page || currentPage);
@@ -94,17 +106,43 @@ const Dashboard = () => {
         setIsLoadingResumes(false);
       }
     }
-  }, [limit]);
+  }, [limit, searchQuery, statusFilter, sortBy, sortOrder]);
 
   // Load initial statistics on mount
   useEffect(() => {
     fetchDashboardStats();
   }, [fetchDashboardStats]);
 
-  // Load history list whenever page changes
+  // Load history list whenever page, search, status, or sorting changes
   useEffect(() => {
-    fetchResumes(page);
-  }, [fetchResumes, page]);
+    fetchResumes(page, searchQuery, statusFilter, sortBy, sortOrder);
+  }, [fetchResumes, page, searchQuery, statusFilter, sortBy, sortOrder]);
+
+  // Filter & Search Handlers
+  const handleSearchChange = (e) => {
+    setSearchQuery(e.target.value);
+    setPage(1);
+  };
+
+  const handleStatusFilterChange = (e) => {
+    setStatusFilter(e.target.value);
+    setPage(1);
+  };
+
+  const handleSortChange = (e) => {
+    const [newSortBy, newSortOrder] = e.target.value.split(':');
+    setSortBy(newSortBy || 'uploadDate');
+    setSortOrder(newSortOrder || 'desc');
+    setPage(1);
+  };
+
+  const handleClearFilters = () => {
+    setSearchQuery('');
+    setStatusFilter('');
+    setSortBy('uploadDate');
+    setSortOrder('desc');
+    setPage(1);
+  };
 
   // Handle Delete Confirmation Modal Opening
   const handleOpenDeleteModal = (resume) => {
@@ -136,10 +174,10 @@ const Dashboard = () => {
         // Refresh dashboard statistics and history list
         await fetchDashboardStats();
         
-        // Adjust page if deleting last item on current page
         const isLastItemOnPage = resumes.length === 1 && page > 1;
         const targetPage = isLastItemOnPage ? page - 1 : page;
-        await fetchResumes(targetPage);
+        if (isLastItemOnPage) setPage(targetPage);
+        await fetchResumes(targetPage, searchQuery, statusFilter, sortBy, sortOrder);
       } else {
         throw new Error(response.message || 'Failed to delete resume');
       }
@@ -265,7 +303,9 @@ const Dashboard = () => {
               <div className="h-8 bg-slate-800 rounded w-16 animate-pulse" />
             ) : (
               <span className="text-3xl font-bold text-purple-300">
-                {stats.avgAtsScore > 0 ? `${stats.avgAtsScore} / 100` : 'N/A'}
+                {stats.avgAtsScore !== null && stats.avgAtsScore !== undefined
+                  ? `${stats.avgAtsScore} / 100`
+                  : 'N/A'}
               </span>
             )}
             <span className="text-xs font-medium text-purple-400">Overall Match</span>
@@ -339,6 +379,71 @@ const Dashboard = () => {
         </Card.Header>
 
         <Card.Content>
+          {/* Controls Bar: Search, Status Filter, Sort */}
+          <div className="mb-5 flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between bg-slate-950/40 p-3 rounded-xl border border-slate-800/80">
+            {/* Search Input */}
+            <div className="relative flex-1">
+              <Icon name="search" className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={handleSearchChange}
+                placeholder="Search by filename or job title..."
+                aria-label="Search resumes"
+                className="w-full pl-9 pr-8 py-2 bg-slate-900 border border-slate-800 rounded-lg text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
+              />
+              {searchQuery && (
+                <button
+                  onClick={() => { setSearchQuery(''); setPage(1); }}
+                  aria-label="Clear search query"
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 text-xs font-bold"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+
+            {/* Filter & Sort Controls Group */}
+            <div className="flex flex-wrap items-center gap-2">
+              {/* Status Filter Dropdown */}
+              <select
+                value={statusFilter}
+                onChange={handleStatusFilterChange}
+                aria-label="Filter by analysis status"
+                className="bg-slate-900 border border-slate-800 rounded-lg text-xs text-slate-300 py-2 px-3 focus:outline-none focus:border-indigo-500 transition-colors cursor-pointer"
+              >
+                <option value="">All Statuses</option>
+                <option value="completed">Analyzed</option>
+                <option value="pending">Pending</option>
+                <option value="failed">Failed</option>
+              </select>
+
+              {/* Sort By Dropdown */}
+              <select
+                value={`${sortBy}:${sortOrder}`}
+                onChange={handleSortChange}
+                aria-label="Sort resumes by"
+                className="bg-slate-900 border border-slate-800 rounded-lg text-xs text-slate-300 py-2 px-3 focus:outline-none focus:border-indigo-500 transition-colors cursor-pointer"
+              >
+                <option value="uploadDate:desc">Newest First</option>
+                <option value="uploadDate:asc">Oldest First</option>
+                <option value="atsScore:desc">Highest ATS Score</option>
+                <option value="atsScore:asc">Lowest ATS Score</option>
+                <option value="fileName:asc">File Name (A-Z)</option>
+              </select>
+
+              {/* Reset Filters Button (shown if non-default state) */}
+              {(searchQuery || statusFilter || sortBy !== 'uploadDate' || sortOrder !== 'desc') && (
+                <button
+                  onClick={handleClearFilters}
+                  className="text-xs font-semibold text-indigo-400 hover:text-indigo-300 px-2 py-1 transition-colors"
+                >
+                  Reset
+                </button>
+              )}
+            </div>
+          </div>
+
           {/* Loading Skeleton */}
           {isLoadingResumes ? (
             <div className="space-y-3 py-4">
@@ -356,15 +461,27 @@ const Dashboard = () => {
             </div>
           ) : resumes.length === 0 ? (
             /* Empty State */
-            <EmptyState
-              icon="fileText"
-              title="No Resumes Uploaded Yet"
-              description="Upload your first resume in PDF or DOCX format to see analysis history and ATS metrics here."
-              actionLabel="Upload Resume Now"
-              onAction={() => navigate('/upload')}
-              actionIcon="upload"
-              className="my-4"
-            />
+            searchQuery || statusFilter ? (
+              <EmptyState
+                icon="fileText"
+                title="No Matching Resumes Found"
+                description={`No resumes match your current search "${searchQuery || statusFilter}". Try resetting filters.`}
+                actionLabel="Reset Filters"
+                onAction={handleClearFilters}
+                actionIcon="rotateCcw"
+                className="my-4"
+              />
+            ) : (
+              <EmptyState
+                icon="fileText"
+                title="No Resumes Uploaded Yet"
+                description="Upload your first resume in PDF or DOCX format to see analysis history and ATS metrics here."
+                actionLabel="Upload Resume Now"
+                onAction={() => navigate('/upload')}
+                actionIcon="upload"
+                className="my-4"
+              />
+            )
           ) : (
             /* History Table */
             <div className="overflow-x-auto">

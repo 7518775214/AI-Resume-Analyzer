@@ -57,7 +57,7 @@ class DashboardService {
       const totalAnalyses = facet.totalAnalyses?.[0]?.count || 0;
       const totalInterviewSessions = facet.totalInterviewSessions?.[0]?.count || 0;
       const rawAvg = facet.avgAtsScore?.[0]?.averageScore;
-      const avgAtsScore = typeof rawAvg === 'number' ? Math.round(rawAvg) : 0;
+      const avgAtsScore = typeof rawAvg === 'number' ? Math.round(rawAvg) : null;
 
       return {
         totalResumes,

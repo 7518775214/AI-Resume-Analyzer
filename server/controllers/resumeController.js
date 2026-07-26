@@ -158,12 +158,43 @@ const getUserResumes = async (req, res) => {
     const limit = Math.min(50, Math.max(1, parseInt(req.query.limit, 10) || 10));
     const skip = (page - 1) * limit;
 
-    const total = await Resume.countDocuments({ userId });
+    const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+    const statusFilter = typeof req.query.status === 'string' ? req.query.status.trim() : '';
+    const sortBy = typeof req.query.sortBy === 'string' ? req.query.sortBy.trim() : 'uploadDate';
+    const sortOrderParam = typeof req.query.sortOrder === 'string' ? req.query.sortOrder.toLowerCase().trim() : 'desc';
+    const sortOrder = sortOrderParam === 'asc' ? 1 : -1;
+
+    // Construct Mongoose query filter
+    const query = { userId };
+
+    if (search) {
+      const escapedSearch = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      query.$or = [
+        { originalFileName: { $regex: escapedSearch, $options: 'i' } },
+        { jobTitle: { $regex: escapedSearch, $options: 'i' } },
+      ];
+    }
+
+    if (statusFilter && statusFilter !== 'all') {
+      query.analysisStatus = statusFilter;
+    }
+
+    // Determine sorting logic
+    let sortOption = { uploadDate: -1 };
+    if (sortBy === 'atsScore') {
+      sortOption = { 'analysis.atsScore': sortOrder, uploadDate: -1 };
+    } else if (sortBy === 'fileName') {
+      sortOption = { originalFileName: sortOrder };
+    } else if (sortBy === 'uploadDate') {
+      sortOption = { uploadDate: sortOrder };
+    }
+
+    const total = await Resume.countDocuments(query);
     
     // Select specific list fields to optimize query execution and payload size
-    const resumes = await Resume.find({ userId })
+    const resumes = await Resume.find(query)
       .select('originalFileName storedFileName fileUrl fileType fileSize jobTitle jobDescription parsingStatus analysisStatus interviewQuestionsStatus analysis.atsScore uploadDate createdAt updatedAt')
-      .sort({ uploadDate: -1 })
+      .sort(sortOption)
       .skip(skip)
       .limit(limit)
       .lean();
