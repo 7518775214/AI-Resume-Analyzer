@@ -4,6 +4,7 @@ const Resume = require('../models/Resume');
 const storageService = require('../services/storageService');
 const parsingService = require('../services/parsingService');
 const geminiService = require('../services/geminiService');
+const interviewAiService = require('../services/interviewAiService');
 
 /**
  * Controller to handle resume upload, text extraction, and metadata persistence
@@ -278,10 +279,108 @@ const analyzeResume = async (req, res) => {
   }
 };
 
+/**
+ * Controller to trigger Gemini AI Interview Question Generation based on parsed resume & analysis
+ * 
+ * @route   POST /api/resumes/:id/generate-questions
+ * @access  Private (Protected by JWT)
+ */
+const generateInterviewQuestions = async (req, res) => {
+  try {
+    const userId = req.user?.id;
+    const { id } = req.params;
+    const { targetRole: customTargetRole } = req.body || {};
+
+    if (!userId) {
+      return res.status(401).json({
+        status: 'fail',
+        message: 'Unauthorized access. User authentication required.',
+      });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid resume ID format.',
+      });
+    }
+
+    // 1. Fetch resume belonging to user
+    const resume = await Resume.findOne({ _id: id, userId });
+    if (!resume) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Resume document not found.',
+      });
+    }
+
+    // 2. Validate parsed text presence
+    if (!resume.extractedText || resume.extractedText.trim() === '') {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Resume text content is empty or could not be parsed. Please re-upload a clear PDF or DOCX file.',
+      });
+    }
+
+    const effectiveTargetRole = (customTargetRole && typeof customTargetRole === 'string' && customTargetRole.trim()) || resume.jobTitle || 'Software Engineer';
+
+    // 3. Mark status as pending
+    resume.interviewQuestionsStatus = 'pending';
+    await resume.save();
+
+    // 4. Call dedicated Interview AI Service
+    try {
+      const questionsResult = await interviewAiService.generateInterviewQuestions(
+        resume.extractedText,
+        resume.analysis,
+        effectiveTargetRole
+      );
+
+      // 5. Save generated questions in MongoDB document
+      resume.interviewQuestions = questionsResult;
+      resume.interviewQuestionsStatus = 'completed';
+      if (customTargetRole && customTargetRole.trim()) {
+        resume.jobTitle = customTargetRole.trim();
+      }
+      await resume.save();
+
+      // 6. Return clean JSON response
+      return res.status(200).json({
+        status: 'success',
+        message: 'AI interview questions generated successfully.',
+        data: {
+          resumeId: resume._id,
+          targetRole: effectiveTargetRole,
+          interviewQuestionsStatus: resume.interviewQuestionsStatus,
+          interviewQuestions: resume.interviewQuestions,
+        },
+      });
+    } catch (aiError) {
+      console.error(`[RESUME CONTROLLER ERROR] Interview questions generation failed for resume ${id}:`, aiError);
+
+      resume.interviewQuestionsStatus = 'failed';
+      await resume.save();
+
+      return res.status(500).json({
+        status: 'error',
+        message: aiError.message || 'Gemini AI Interview Question Generation failed. Please check API key or try again.',
+      });
+    }
+  } catch (error) {
+    console.error('[RESUME CONTROLLER ERROR] Unexpected failure generating interview questions:', error);
+    return res.status(500).json({
+      status: 'error',
+      message: 'An unexpected internal server error occurred while generating interview questions.',
+    });
+  }
+};
+
 module.exports = {
   uploadResume,
   getUserResumes,
   getResumeById,
   analyzeResume,
+  generateInterviewQuestions,
 };
+
 

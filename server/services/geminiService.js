@@ -314,4 +314,6 @@ module.exports = {
   analyzeResume,
   validateAnalysisResponse,
   extractJsonString,
+  fetchWithTimeoutAndRetry,
 };
+

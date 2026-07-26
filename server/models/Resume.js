@@ -82,6 +82,24 @@ const resumeSchema = new mongoose.Schema(
         type: Date,
       },
     },
+    interviewQuestionsStatus: {
+      type: String,
+      enum: ['none', 'pending', 'completed', 'failed'],
+      default: 'none',
+    },
+    interviewQuestions: {
+      technical: {
+        easy: [{ type: String }],
+        medium: [{ type: String }],
+        hard: [{ type: String }],
+      },
+      hr: [{ type: String }],
+      projectBased: [{ type: String }],
+      tips: [{ type: String }],
+      generatedAt: {
+        type: Date,
+      },
+    },
     uploadDate: {
       type: Date,
       default: Date.now,

@@ -57,7 +57,19 @@ const resumeService = {
     const response = await api.post(`/resumes/${id}/analyze`);
     return response.data;
   },
+
+  /**
+   * Triggers Gemini AI Interview Question Generation for target resume ID
+   * @param {string} id - Resume document ID
+   * @param {string} [targetRole] - Optional target role override
+   * @returns {Promise<object>} API response object with interview questions result
+   */
+  generateInterviewQuestions: async (id, targetRole = '') => {
+    const response = await api.post(`/resumes/${id}/generate-questions`, { targetRole });
+    return response.data;
+  },
 };
 
 export default resumeService;
+
 
