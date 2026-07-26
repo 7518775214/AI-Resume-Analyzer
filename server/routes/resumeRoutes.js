@@ -9,6 +9,7 @@ const {
   analyzeResume,
   generateInterviewQuestions,
   deleteResume,
+  exportResumePdf,
 } = require('../controllers/resumeController');
 
 /**
@@ -30,6 +31,11 @@ router.get('/', authenticateToken, getUserResumes);
 // @desc    Get single resume details including extracted text
 // @access  Private
 router.get('/:id', authenticateToken, getResumeById);
+
+// @route   GET /api/resumes/:id/export-pdf
+// @desc    Generate and stream downloadable PDF analysis report
+// @access  Private
+router.get('/:id/export-pdf', authenticateToken, exportResumePdf);
 
 // @route   POST /api/resumes/:id/analyze
 // @desc    Trigger Gemini AI Resume Analysis on extracted text

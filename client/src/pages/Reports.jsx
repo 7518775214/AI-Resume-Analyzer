@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import PageHeader from '../components/PageHeader';
 import Card from '../components/Card';
@@ -6,13 +6,68 @@ import Input from '../components/Input';
 import Button from '../components/Button';
 import Icon from '../components/Icon';
 import EmptyState from '../components/EmptyState';
+import resumeService from '../services/resumeService';
 import { mockReports } from '../utils/mockData';
+import { downloadPdfReport, parseApiErrorMessage } from '../utils/downloadHelper';
 
 const Reports = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedType, setSelectedType] = useState('All');
+  const [userResumes, setUserResumes] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [exportingId, setExportingId] = useState(null);
+  const [pdfError, setPdfError] = useState(null);
 
-  const filteredReports = mockReports.filter((rep) => {
+  useEffect(() => {
+    fetchReports();
+  }, []);
+
+  const fetchReports = async () => {
+    setIsLoading(true);
+    try {
+      const response = await resumeService.getUserResumes(1, 50);
+      if (response.status === 'success' && response.data?.resumes) {
+        setUserResumes(response.data.resumes);
+      }
+    } catch (err) {
+      console.error('[REPORTS PAGE ERROR] Failed to fetch resumes:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleDownloadPdf = async (id, fileName) => {
+    setExportingId(id);
+    setPdfError(null);
+
+    try {
+      const blobData = await resumeService.exportResumePdf(id);
+      downloadPdfReport(blobData, fileName);
+    } catch (err) {
+      console.error('[PDF EXPORT ERROR]', err);
+      const msg = await parseApiErrorMessage(err, 'Failed to download PDF report. Ensure analysis is complete.');
+      setPdfError(msg);
+    } finally {
+      setExportingId(null);
+    }
+  };
+
+  // Combine real user resumes with mock items if userResumes is empty
+  const displayReports = userResumes.length > 0
+    ? userResumes.map((res) => ({
+        id: res._id || res.id,
+        title: res.jobTitle ? `${res.jobTitle} Scan` : res.originalFileName,
+        originalFileName: res.originalFileName,
+        date: new Date(res.uploadDate || res.createdAt).toLocaleDateString(),
+        type: 'Resume Scan',
+        atsScore: res.analysis?.atsScore || 0,
+        status: res.analysisStatus === 'completed' ? 'Completed' : res.analysisStatus || 'Pending',
+        isReal: true,
+        hasAnalysis: res.analysisStatus === 'completed',
+      }))
+    : mockReports.map((r) => ({ ...r, isReal: false, hasAnalysis: true }));
+
+  const filteredReports = displayReports.filter((rep) => {
     const matchesSearch = rep.title.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesType = selectedType === 'All' || rep.type.toLowerCase().includes(selectedType.toLowerCase());
     return matchesSearch && matchesType;
@@ -25,8 +80,20 @@ const Reports = () => {
         title="Reports & Historical Scans"
         subtitle="Access all past ATS resume scans, keyword gap analysis, and AI mock interview score summaries."
         breadcrumbs={['Dashboard', 'Reports']}
-        badge={`${mockReports.length} Saved Reports`}
+        badge={`${displayReports.length} Saved Reports`}
       />
+
+      {pdfError && (
+        <div className="p-4 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-300 text-xs flex items-center justify-between">
+          <div className="flex items-center space-x-2">
+            <Icon name="alertCircle" className="w-4 h-4 text-rose-400 shrink-0" />
+            <span>{pdfError}</span>
+          </div>
+          <button onClick={() => setPdfError(null)} className="text-rose-400 font-semibold underline">
+            Dismiss
+          </button>
+        </div>
+      )}
 
       {/* Filter Controls Bar */}
       <Card className="p-4">
@@ -56,7 +123,13 @@ const Reports = () => {
       </Card>
 
       {/* Reports Table / List */}
-      {filteredReports.length > 0 ? (
+      {isLoading ? (
+        <Card className="p-6 space-y-4">
+          {[1, 2, 3].map((n) => (
+            <div key={n} className="h-12 bg-slate-900 rounded-xl animate-pulse" />
+          ))}
+        </Card>
+      ) : filteredReports.length > 0 ? (
         <Card className="p-0 overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs text-slate-300">
@@ -92,14 +165,28 @@ const Reports = () => {
                       <span className="text-xs font-semibold text-indigo-400">{rep.status}</span>
                     </td>
                     <td className="py-4 px-6 text-right space-x-2">
-                      <Link to="/analysis">
+                      <Link to={rep.isReal ? `/analysis?id=${rep.id}` : '/analysis'}>
                         <Button variant="outline" size="sm" icon={<Icon name="eye" className="w-3.5 h-3.5" />}>
                           View
                         </Button>
                       </Link>
-                      <Button variant="ghost" size="sm" icon={<Icon name="download" className="w-3.5 h-3.5" />}>
-                        PDF
-                      </Button>
+                      {rep.isReal && rep.hasAnalysis && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          disabled={exportingId === rep.id}
+                          onClick={() => handleDownloadPdf(rep.id, rep.originalFileName)}
+                          icon={
+                            exportingId === rep.id ? (
+                              <Icon name="loader" className="w-3.5 h-3.5 animate-spin" />
+                            ) : (
+                              <Icon name="download" className="w-3.5 h-3.5" />
+                            )
+                          }
+                        >
+                          {exportingId === rep.id ? 'PDF...' : 'PDF'}
+                        </Button>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -122,3 +209,4 @@ const Reports = () => {
 };
 
 export default Reports;
+

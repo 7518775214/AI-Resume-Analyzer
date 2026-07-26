@@ -82,6 +82,18 @@ const resumeService = {
     const response = await api.delete(`/resumes/${id}`);
     return response.data;
   },
+
+  /**
+   * Downloads generated PDF analysis report as a binary blob for target resume ID
+   * @param {string} id - Resume document ID
+   * @returns {Promise<Blob>} API blob response
+   */
+  exportResumePdf: async (id) => {
+    const response = await api.get(`/resumes/${id}/export-pdf`, {
+      responseType: 'blob',
+    });
+    return response.data;
+  },
 };
 
 export default resumeService;

@@ -5,6 +5,7 @@ const storageService = require('../services/storageService');
 const parsingService = require('../services/parsingService');
 const geminiService = require('../services/geminiService');
 const interviewAiService = require('../services/interviewAiService');
+const pdfService = require('../services/pdfService');
 
 /**
  * Controller to handle resume upload, text extraction, and metadata persistence
@@ -451,6 +452,81 @@ const deleteResume = async (req, res) => {
   }
 };
 
+/**
+ * Controller to generate and stream PDF export report for resume analysis
+ * 
+ * @route   GET /api/resumes/:id/export-pdf
+ * @access  Private (Protected by JWT)
+ */
+const exportResumePdf = async (req, res) => {
+  try {
+    const userId = req.user?.id;
+    const { id } = req.params;
+
+    if (!userId) {
+      return res.status(401).json({
+        status: 'fail',
+        message: 'Unauthorized access. Authentication token required.',
+      });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid resume ID format.',
+      });
+    }
+
+    // 1. Fetch resume document belonging to user (select relevant fields to optimize query execution and payload size)
+    const resume = await Resume.findOne({ _id: id, userId })
+      .select('originalFileName storedFileName fileUrl fileType fileSize jobTitle jobDescription analysisStatus analysis uploadDate createdAt updatedAt userId')
+      .populate('userId', 'fullName email');
+
+    if (!resume) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Resume document not found.',
+      });
+    }
+
+    // 2. Validate that analysis is completed and data is present
+    if (resume.analysisStatus !== 'completed' || !resume.analysis) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Resume analysis has not been completed yet. Please generate AI Analysis first before exporting PDF.',
+      });
+    }
+
+    // 3. Determine candidate name
+    const candidateName = resume.userId?.fullName || req.user?.fullName || 'Candidate';
+
+    // 4. Sanitize file name for Content-Disposition header
+    const sanitizedFileName = (resume.originalFileName || 'Resume')
+      .replace(/[^a-zA-Z0-9._-]/g, '_')
+      .replace(/\.[^/.]+$/, '');
+    const downloadFileName = `${sanitizedFileName}_AI_Analysis.pdf`;
+
+    // 5. Set response headers for attachment PDF stream download
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${downloadFileName}"`);
+
+    // 6. Stream PDF using dedicated PDF Service
+    await pdfService.generateResumeAnalysisPdf(resume, candidateName, res);
+  } catch (error) {
+    console.error('[RESUME CONTROLLER ERROR] Failed to export PDF:', error);
+
+    // If headers have not been sent yet, return clean JSON error response
+    if (!res.headersSent) {
+      return res.status(500).json({
+        status: 'error',
+        message: 'An internal error occurred while generating the PDF analysis report.',
+      });
+    } else {
+      res.end();
+    }
+  }
+};
+
 module.exports = {
   uploadResume,
   getUserResumes,
@@ -458,7 +534,9 @@ module.exports = {
   analyzeResume,
   generateInterviewQuestions,
   deleteResume,
+  exportResumePdf,
 };
+
 
 
 

@@ -7,6 +7,7 @@ import Icon from '../components/Icon';
 import Loader from '../components/Loader';
 import EmptyState from '../components/EmptyState';
 import resumeService from '../services/resumeService';
+import { downloadPdfReport, parseApiErrorMessage } from '../utils/downloadHelper';
 
 const ResumeAnalysis = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -18,7 +19,9 @@ const ResumeAnalysis = () => {
 
   const [isLoadingResumes, setIsLoadingResumes] = useState(true);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [isExportingPdf, setIsExportingPdf] = useState(false);
   const [error, setError] = useState(null);
+  const [pdfError, setPdfError] = useState(null);
 
   // 1. Fetch all user resumes on component mount
   useEffect(() => {
@@ -58,6 +61,7 @@ const ResumeAnalysis = () => {
 
   const fetchResumeDetails = async (id) => {
     setError(null);
+    setPdfError(null);
     try {
       const response = await resumeService.getResumeById(id);
       if (response.status === 'success' && response.data?.resume) {
@@ -98,6 +102,25 @@ const ResumeAnalysis = () => {
     }
   };
 
+  // 4. Download PDF Analysis Report via backend endpoint
+  const handleDownloadPdf = async () => {
+    if (!selectedResumeId) return;
+
+    setIsExportingPdf(true);
+    setPdfError(null);
+
+    try {
+      const blobData = await resumeService.exportResumePdf(selectedResumeId);
+      downloadPdfReport(blobData, activeResume?.originalFileName);
+    } catch (err) {
+      console.error('[PDF EXPORT ERROR]', err);
+      const errorMessage = await parseApiErrorMessage(err, 'Failed to generate PDF report. Please try again.');
+      setPdfError(errorMessage);
+    } finally {
+      setIsExportingPdf(false);
+    }
+  };
+
   const handleSelectChange = (e) => {
     const newId = e.target.value;
     setSelectedResumeId(newId);
@@ -128,6 +151,22 @@ const ResumeAnalysis = () => {
         breadcrumbs={['Workspace', 'Analysis']}
         action={
           <div className="flex items-center space-x-3">
+            {hasAnalysis && (
+              <Button
+                variant="secondary"
+                onClick={handleDownloadPdf}
+                disabled={isExportingPdf || isAnalyzing}
+                icon={
+                  isExportingPdf ? (
+                    <Icon name="loader" className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Icon name="download" className="w-4 h-4" />
+                  )
+                }
+              >
+                {isExportingPdf ? 'Generating PDF...' : 'Download PDF Report'}
+              </Button>
+            )}
             <Link to="/upload">
               <Button variant="outline" icon={<Icon name="upload" className="w-4 h-4" />}>
                 Upload New Resume
@@ -147,7 +186,7 @@ const ResumeAnalysis = () => {
             <select
               value={selectedResumeId}
               onChange={handleSelectChange}
-              disabled={isLoadingResumes || isAnalyzing}
+              disabled={isLoadingResumes || isAnalyzing || isExportingPdf}
               className="w-full sm:max-w-md bg-slate-900 border border-slate-800 text-sm text-slate-100 rounded-xl px-4 py-2.5 focus:outline-none focus:border-indigo-500 transition-colors disabled:opacity-50"
             >
               {resumes.length === 0 ? (
@@ -163,11 +202,27 @@ const ResumeAnalysis = () => {
           </div>
 
           {selectedResumeId && (
-            <div className="w-full sm:w-auto flex justify-end">
+            <div className="w-full sm:w-auto flex flex-wrap items-center justify-end gap-3">
+              {hasAnalysis && (
+                <Button
+                  variant="secondary"
+                  onClick={handleDownloadPdf}
+                  disabled={isExportingPdf || isAnalyzing}
+                  icon={
+                    isExportingPdf ? (
+                      <Icon name="loader" className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Icon name="download" className="w-4 h-4" />
+                    )
+                  }
+                >
+                  {isExportingPdf ? 'Downloading PDF...' : 'Download PDF Report'}
+                </Button>
+              )}
               <Button
                 variant="primary"
                 onClick={handleAnalyzeResume}
-                disabled={isAnalyzing || isLoadingResumes}
+                disabled={isAnalyzing || isLoadingResumes || isExportingPdf}
                 icon={<Icon name="sparkles" className="w-4 h-4" />}
               >
                 {hasAnalysis ? 'Re-Analyze with Gemini AI' : 'Run Gemini AI Analysis'}
@@ -176,6 +231,23 @@ const ResumeAnalysis = () => {
           )}
         </div>
       </Card>
+
+      {/* PDF Export Error Alert */}
+      {pdfError && (
+        <div className="p-4 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-300 text-sm flex items-start space-x-3">
+          <Icon name="alertCircle" className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
+          <div className="flex-1 space-y-1">
+            <p className="font-semibold text-rose-200">PDF Generation Error</p>
+            <p className="text-xs text-rose-300/90 leading-relaxed">{pdfError}</p>
+          </div>
+          <button
+            onClick={() => setPdfError(null)}
+            className="text-xs font-semibold text-rose-400 hover:text-rose-200"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
 
       {/* Error Alert Message */}
       {error && (
