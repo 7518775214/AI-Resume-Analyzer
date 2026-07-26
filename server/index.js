@@ -9,6 +9,7 @@ const connectDB = require('./config/db');
 const validateEnv = require('./config/validateEnv');
 const logger = require('./utils/logger');
 
+const mongoSanitize = require('./middleware/mongoSanitize');
 const { apiLimiter, sensitiveLimiter } = require('./middleware/rateLimiter');
 const notFoundHandler = require('./middleware/notFoundHandler');
 const errorHandler = require('./middleware/errorHandler');
@@ -39,10 +40,19 @@ app.use(
   })
 );
 
-// 5. CORS Configuration
+// 5. CORS Configuration with origin normalization
+const allowedOrigins = CLIENT_URL.split(',').map((o) => o.trim().replace(/\/$/, ''));
 app.use(
   cors({
-    origin: CLIENT_URL,
+    origin: (origin, callback) => {
+      // Allow requests with no origin (like mobile apps, curl, server-to-server)
+      if (!origin) return callback(null, true);
+      const normalizedOrigin = origin.replace(/\/$/, '');
+      if (allowedOrigins.includes(normalizedOrigin) || allowedOrigins.includes('*')) {
+        return callback(null, true);
+      }
+      return callback(new Error(`CORS policy restriction: Origin '${origin}' is not allowed.`));
+    },
     credentials: true,
   })
 );
@@ -51,9 +61,10 @@ app.use(
 const morganFormat = process.env.NODE_ENV === 'production' ? 'combined' : 'dev';
 app.use(morgan(morganFormat, { stream: logger.stream }));
 
-// 7. Request Body Parsing with 2MB Body Size Limits
+// 7. Request Body Parsing with 2MB Body Size Limits & NoSQL Injection Sanitization
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true, limit: '2mb' }));
+app.use(mongoSanitize);
 
 // 8. Global Rate Limiter for all API routes
 app.use('/api', apiLimiter);

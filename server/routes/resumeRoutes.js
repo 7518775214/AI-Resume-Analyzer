@@ -36,7 +36,7 @@ router.get('/:id', authenticateToken, getResumeById);
 // @route   GET /api/resumes/:id/export-pdf
 // @desc    Generate and stream downloadable PDF analysis report
 // @access  Private
-router.get('/:id/export-pdf', authenticateToken, exportResumePdf);
+router.get('/:id/export-pdf', authenticateToken, sensitiveLimiter, exportResumePdf);
 
 // @route   POST /api/resumes/:id/analyze
 // @desc    Trigger Gemini AI Resume Analysis on extracted text

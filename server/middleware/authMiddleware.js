@@ -40,8 +40,14 @@ const authenticateToken = (req, res, next) => {
 
     const token = authMatch[1].trim();
 
-    // 4. Retrieve secret key from environment variables (matches fallback in authController)
-    const jwtSecret = process.env.JWT_SECRET || 'supersecret_jwt_key_ai_resume_analyzer_2026';
+    // 4. Retrieve secret key from environment variables
+    const jwtSecret = process.env.JWT_SECRET;
+    if (!jwtSecret) {
+      return res.status(500).json({
+        status: 'error',
+        message: 'Server security configuration error. JWT secret missing.',
+      });
+    }
 
     // 5. Verify token synchronously (zero async Promise overhead, high execution speed)
     const decoded = jwt.verify(token, jwtSecret);

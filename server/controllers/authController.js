@@ -109,7 +109,10 @@ const login = async (req, res, next) => {
     }
 
     // 5. Read JWT secret and expiration from environment variables
-    const secretKey = process.env.JWT_SECRET || 'supersecret_jwt_key_ai_resume_analyzer_2026';
+    const secretKey = process.env.JWT_SECRET;
+    if (!secretKey) {
+      throw new Error('JWT_SECRET environment variable is not defined.');
+    }
     const jwtExpiresIn = process.env.JWT_EXPIRES_IN || '7d';
 
     // 6. Generate JWT token
