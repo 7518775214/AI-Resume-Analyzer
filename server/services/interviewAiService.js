@@ -9,7 +9,7 @@
 
 const logger = require('../utils/logger');
 const { cleanExtractedText } = require('../utils/textCleaner');
-const { extractJsonString, callGeminiApi } = require('./geminiService');
+const { extractJsonString, callGeminiApi, parseGeminiJson } = require('./geminiService');
 
 /**
  * Validates and normalizes Gemini AI response into required interview questions schema.
@@ -147,6 +147,7 @@ CRITICAL REQUIREMENTS:
 1. You MUST respond ONLY with a valid, strictly formatted JSON object.
 2. Do NOT include any markdown code blocks or text outside the JSON response.
 3. Every question must be tailored specifically to the candidate's actual background, listed projects, skills, gaps, and target role.
+4. Ensure string values use double backslashes (\\\\) for any Windows paths or special characters, and do NOT include raw unescaped line breaks inside string values.
 
 REQUIRED JSON SCHEMA:
 {
@@ -180,8 +181,7 @@ Generate tailored interview questions and preparation tips in STRICT JSON matchi
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       const rawResponseText = await callGeminiApi(systemContext, userContent, { temperature: 0.3 });
-      const cleanedJsonStr = extractJsonString(rawResponseText);
-      const parsedData = JSON.parse(cleanedJsonStr);
+      const parsedData = parseGeminiJson(rawResponseText, `INTERVIEW QUESTIONS (Attempt ${attempt})`);
       return validateInterviewQuestionsResponse(parsedData);
     } catch (parseErr) {
       lastParseErr = parseErr;
@@ -196,12 +196,10 @@ Generate tailored interview questions and preparation tips in STRICT JSON matchi
   }
 
   logger.error('[INTERVIEW AI SERVICE ERROR] All interview questions parsing attempts failed:', lastParseErr?.message);
-  throw new Error('Gemini API returned an unparseable response. Please try again.');
+  throw new Error(`Gemini API returned an unparseable response structure. Error: ${lastParseErr?.message}`);
 };
 
 module.exports = {
   generateInterviewQuestions,
   validateInterviewQuestionsResponse,
 };
-
-

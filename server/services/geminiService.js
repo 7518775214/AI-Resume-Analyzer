@@ -18,23 +18,182 @@ const { cleanExtractedText } = require('../utils/textCleaner');
  * @returns {string} Cleaned JSON string
  */
 const extractJsonString = (rawText) => {
-  if (!rawText) return '{}';
-  let cleaned = rawText.trim();
+  if (!rawText || typeof rawText !== 'string') return '{}';
 
-  // 1. Extract content inside markdown code blocks ```json ... ``` if present
-  const codeBlockMatch = cleaned.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  // 1. Remove UTF-8 BOM, zero-width spaces, and non-breaking spaces
+  let cleaned = rawText
+    .replace(/^\uFEFF/, '')
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')
+    .trim();
+
+  // 2. Extract content inside markdown code blocks ```json ... ``` if present
+  const codeBlockMatch = cleaned.match(/```(?:json|JSON)?\s*([\s\S]*?)\s*```/);
   if (codeBlockMatch && codeBlockMatch[1]) {
     cleaned = codeBlockMatch[1].trim();
   }
 
-  // 2. Extract substring between the first '{' and the last '}'
+  // 3. Extract substring between the first '{' and the last '}'
   const firstBrace = cleaned.indexOf('{');
   const lastBrace = cleaned.lastIndexOf('}');
-  if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
-    cleaned = cleaned.substring(firstBrace, lastBrace + 1);
+  if (firstBrace !== -1) {
+    if (lastBrace !== -1 && lastBrace > firstBrace) {
+      cleaned = cleaned.substring(firstBrace, lastBrace + 1);
+    } else {
+      // Incomplete/truncated JSON ending without closing brace
+      cleaned = cleaned.substring(firstBrace);
+    }
   }
 
-  return cleaned;
+  return cleaned.trim();
+};
+
+/**
+ * Repair common LLM JSON syntax anomalies:
+ * - Smart/curly double and single quotes
+ * - Trailing commas before closing braces/brackets
+ * - Illegal ASCII control characters
+ * - Invalid escape backslashes
+ * 
+ * @param {string} jsonStr 
+ * @returns {string} Repaired JSON string
+ */
+const repairJsonSyntax = (jsonStr) => {
+  if (!jsonStr || typeof jsonStr !== 'string') return '{}';
+  let s = jsonStr;
+
+  // 1. Replace smart/curly quotes with standard quotes
+  s = s.replace(/[“”]/g, '"').replace(/[‘’]/g, "'");
+
+  // 2. Remove trailing commas before closing braces or brackets
+  s = s.replace(/,\s*([}\]])/g, '$1');
+
+  // 3. Remove illegal control characters (except \t, \n, \r)
+  s = s.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '');
+
+  // 4. Fix invalid escape backslashes (backslashes not followed by valid JSON escape character)
+  // Valid JSON escape chars: ", \, /, b, f, n, r, t, uXXXX
+  s = s.replace(/\\(?!["\\/bfnrt]|u[0-9a-fA-F]{4})/g, '\\\\');
+
+  return s;
+};
+
+/**
+ * Attempt to repair truncated JSON responses caused by API token limits.
+ * Auto-closes unclosed strings, arrays, and objects.
+ * 
+ * @param {string} jsonStr 
+ * @returns {string} Auto-closed repaired JSON string
+ */
+const repairTruncatedJson = (jsonStr) => {
+  if (!jsonStr || typeof jsonStr !== 'string') return '{}';
+  let s = jsonStr.trim();
+
+  let inString = false;
+  let isEscaped = false;
+  const stack = [];
+
+  for (let i = 0; i < s.length; i++) {
+    const char = s[i];
+
+    if (isEscaped) {
+      isEscaped = false;
+      continue;
+    }
+
+    if (char === '\\') {
+      isEscaped = true;
+      continue;
+    }
+
+    if (char === '"') {
+      inString = !inString;
+      continue;
+    }
+
+    if (!inString) {
+      if (char === '{' || char === '[') {
+        stack.push(char);
+      } else if (char === '}') {
+        if (stack.length > 0 && stack[stack.length - 1] === '{') {
+          stack.pop();
+        }
+      } else if (char === ']') {
+        if (stack.length > 0 && stack[stack.length - 1] === '[') {
+          stack.pop();
+        }
+      }
+    }
+  }
+
+  // If ended inside a string, close quote
+  if (inString) {
+    s += '"';
+  }
+
+  // Clean trailing commas or dangling colons at the end of the string
+  s = s.replace(/,\s*$/, '');
+  s = s.replace(/:\s*$/, ': null');
+
+  // Close remaining open brackets/braces in reverse order
+  while (stack.length > 0) {
+    const top = stack.pop();
+    if (top === '{') {
+      s += '}';
+    } else if (top === '[') {
+      s += ']';
+    }
+  }
+
+  return s;
+};
+
+/**
+ * Resilient multi-stage JSON parser for Gemini API outputs.
+ * Logs raw responses and applies syntax and truncation repairs if direct parse fails.
+ * 
+ * @param {string} rawResponseText 
+ * @param {string} [contextName='Gemini API']
+ * @returns {object} Parsed JavaScript object
+ */
+const parseGeminiJson = (rawResponseText, contextName = 'Gemini API') => {
+  if (!rawResponseText || typeof rawResponseText !== 'string' || rawResponseText.trim().length === 0) {
+    logger.error(`[${contextName} ERROR] Received empty or non-string response.`);
+    throw new Error('Gemini API returned an empty response.');
+  }
+
+  // 1. Log raw Gemini response before parsing
+  logger.info(`[${contextName}] Raw Gemini response received (${rawResponseText.length} chars):`, rawResponseText);
+
+  const cleanedStr = extractJsonString(rawResponseText);
+
+  // Stage 1: Direct JSON.parse
+  try {
+    return JSON.parse(cleanedStr);
+  } catch (err1) {
+    logger.warn(`[${contextName} WARNING] Direct JSON.parse failed (${err1.message}). Attempting syntax repair...`);
+  }
+
+  // Stage 2: Syntax repairs (smart quotes, trailing commas, invalid backslashes, control chars)
+  const syntaxRepaired = repairJsonSyntax(cleanedStr);
+  try {
+    const parsed = JSON.parse(syntaxRepaired);
+    logger.info(`[${contextName}] JSON successfully parsed after syntax repair.`);
+    return parsed;
+  } catch (err2) {
+    logger.warn(`[${contextName} WARNING] Syntax repair parse failed (${err2.message}). Attempting truncated JSON repair...`);
+  }
+
+  // Stage 3: Truncated JSON repair
+  const truncatedRepaired = repairTruncatedJson(syntaxRepaired);
+  try {
+    const parsed = JSON.parse(truncatedRepaired);
+    logger.info(`[${contextName}] JSON successfully parsed after truncated JSON repair.`);
+    return parsed;
+  } catch (err3) {
+    logger.error(`[${contextName} ERROR] All JSON parse attempts failed. Raw Gemini response:`, rawResponseText);
+    logger.error(`[${contextName} ERROR] Parse error details:`, err3.message);
+    throw new Error(`Gemini API returned an unparseable response structure. Error: ${err3.message}`);
+  }
 };
 
 /**
@@ -277,7 +436,7 @@ const callGeminiApi = async (systemContext, userContent, generationConfigOverrid
             generationConfig: {
               responseMimeType: 'application/json',
               temperature: 0.2,
-              maxOutputTokens: 2500,
+              maxOutputTokens: 4096,
               ...generationConfigOverride,
             },
           });
@@ -328,7 +487,7 @@ const callGeminiApi = async (systemContext, userContent, generationConfigOverrid
     generationConfig: {
       responseMimeType: 'application/json',
       temperature: 0.2,
-      maxOutputTokens: 2500,
+      maxOutputTokens: 4096,
       ...generationConfigOverride,
     },
   };
@@ -410,6 +569,7 @@ EVALUATION CRITERIA:
 CRITICAL INSTRUCTIONS:
 1. You MUST respond ONLY with a valid, strictly formatted JSON object.
 2. Do NOT include any markdown wrapper, commentary, or text outside the JSON object.
+3. Ensure string values use double backslashes (\\\\) for any Windows paths or special characters, and do NOT include raw unescaped line breaks inside string values.
 
 REQUIRED JSON SCHEMA:
 {
@@ -438,8 +598,7 @@ Analyze the resume and return STRICT JSON according to the specified schema.`;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       const rawResponseText = await callGeminiApi(systemContext, userContent, { temperature: 0.2 });
-      const cleanedJsonStr = extractJsonString(rawResponseText);
-      const parsedData = JSON.parse(cleanedJsonStr);
+      const parsedData = parseGeminiJson(rawResponseText, `RESUME ANALYSIS (Attempt ${attempt})`);
       return validateAnalysisResponse(parsedData);
     } catch (parseErr) {
       lastParseErr = parseErr;
@@ -454,13 +613,16 @@ Analyze the resume and return STRICT JSON according to the specified schema.`;
   }
 
   logger.error('[GEMINI SERVICE ERROR] All resume analysis parsing attempts failed:', lastParseErr?.message);
-  throw new Error('Gemini API returned an unparseable response structure. Please try again.');
+  throw new Error(`Gemini API returned an unparseable response structure. Error: ${lastParseErr?.message}`);
 };
 
 module.exports = {
   analyzeResume,
   validateAnalysisResponse,
   extractJsonString,
+  repairJsonSyntax,
+  repairTruncatedJson,
+  parseGeminiJson,
   fetchWithTimeoutAndRetry,
   callGeminiApi,
   isApiKeyError,
